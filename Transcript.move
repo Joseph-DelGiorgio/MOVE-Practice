@@ -76,5 +76,5 @@ module myModule::myModule{
         transfer::transfer(transcript, tx_context::sender(ctx));
         // Deletes the wrapper Folder object
         object::delete(id)
-        }
     }
+}
