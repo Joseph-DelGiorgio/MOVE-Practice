@@ -37,5 +37,12 @@ module 0x123::sui_fren {
         attributes: vector<String>,
     }
 
-    // Add the new function here
+    public fun mint(generation: u64, birthdate: u64, attributes: vector<String>, ctx: &mut TxContext): SuiFren {
+        SuiFren {
+            id: object::new(ctx),
+            generation,
+            birthdate,
+            attributes,
+        }
+    }
 }
