@@ -1,11 +1,3 @@
-module EncodeEX {
-
-struct ThisIsAnObject has key {
-    id: UID,
-}
-
-}
-
 module car::car {
 
     use sui::object::{Self, UID};
