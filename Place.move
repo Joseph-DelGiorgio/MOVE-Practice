@@ -6,6 +6,10 @@ module sui_place::place {
         id: UID,
     }
 
+struct map has key, store {
+    id: ID,
+}
+
     struct Quadrant has key, store {
         id: UID,
         quadrant_id: u8,
