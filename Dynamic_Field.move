@@ -66,6 +66,31 @@ module intro_df {
         ofield::add(&mut parent.id, name, child);
     }
 
+
+    //Mutate a DOFChild directly
+    public entry fun mutate_dofchild(child: &mut DOFChild) {
+        child.count = child.count + 1;
+    }
+
+    //Mutate a DFCHILD directly 
+    public fun mutate_dfchild(child: &mut DFChild) {
+        child.count = child.count +1;
+    }
+
+    //Mutate a DFChilds counter via its parent object
+    public entry fun mutate_dfchild_via_parent(parent: &mut Parent, child_name: vector<u8>) {
+        let child = field::borrow_mut<vector<u8>, DFChild> (&mut parent.id, child_name);
+        child.count = child.count + 1;
+    }
+
+    //Mutate a DOFChild counter via its parent object 
+    public entry fun mutate_dofchild_via_parent(parent: Parent, child_name: vector<u8>) {
+        mutate_dofchild(ofield::borrow_mut<vector<u8>, DOFChild>(
+            &mut parent.id,
+            child_name,
+        ));
+    }
+
 }
 
 }
