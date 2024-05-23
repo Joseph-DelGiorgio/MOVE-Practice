@@ -20,6 +20,10 @@ struct map has key, store {
         //todo
     }
 
+    fun make_row(length: u64):vector <u32> {
+        //init empty vector
+    }
+
     public fun set_pixel_at(place: &mut Place, x: u64, y: u64, color: u32) {
         //
     }
