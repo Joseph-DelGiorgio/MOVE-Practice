@@ -58,7 +58,7 @@ module intro_df {
 
     //Adds a DFChild to the parent object under the provided name
     public fun add_dfchild(parent: &mut Parent, child: DFChild, name: vector<u8>) {
-        ofield::add(&mut parent.id, name, child);
+        field::add(&mut parent.id, name, child);
     }
 
     //Adds a DOFChild to the parent under the provided name
