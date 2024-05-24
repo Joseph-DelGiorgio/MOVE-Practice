@@ -47,3 +47,29 @@ module intro_df::capy_car {
     }
     
 }
+
+module The_Capys::table_EX {
+    
+    //tables store homogenous, non objects
+    struct Table<phantom K: copy+ drop + store, phantom V: store> has key, store {
+        // the ID of this table
+        id: UID,
+        // the number of key-value pairs in the table
+        size: u64,
+    }
+
+    struct Bag has key, store {
+        //ID of this bag
+        id: UID,
+        // the number of key value pairs in the bag
+        size: u64,
+    }
+
+    struct ObjectTable<phantom: K: copy + drop + store, phantom V: key + store> has key, store {
+        //ID of this table
+        id: UID,
+        //the number of key value pairs in the table
+        size: u64,
+    }
+
+}
