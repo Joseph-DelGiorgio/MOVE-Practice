@@ -137,6 +137,21 @@ module intro_df::car {
         };
         transfer::transfer(decal, tx_context::sender(ctx));
     }
+
+        public entry fun add_decal(car: &mut Car, decal: Decal) {
+        let decal_id = object::id(&decal);
+        ofield::add(&mut car.id, decal_id, decal);
+
+    }
+
+    public fun get_url_via_child(decal: &Decal): Url {
+        decal.url
+    }
+
+    public fun get_url_via_parent(car: &Car, decal_id: ID): Url {
+        // o field::borrow<Name: copy + drop + store, Value: key + store(object: &UID, name: Name): Value(...)
+        get_url_via_child(ofield::borrow<ID, Decal>(&car.id, decal_id))
+    }
 }
 
 
