@@ -15,6 +15,11 @@ module 0x123::sui_fren {
 
     struct CANDY has drop {}
 
+    struct CandyTreasuryCapHolder has key {
+        id: UID,
+        treasury_cap: TreasuryCap<CANDY>,
+    }
+
     fun init(otw: CANDY, ctx: &mut TxContext) {
         let (treasury, metadata) = coin::create_currency(
             otw,
@@ -26,10 +31,18 @@ module 0x123::sui_fren {
             ctx,
         );
         transfer::public_transfer(metadata, tx_context::sender(ctx));
-        transfer::public_transfer(treasury_cap, tx_context::sender(ctx));
+    
+
+       let treasury_cap_holder = CandyTreasuryCapHolder {
+            id: object::new(ctx),
+            treasury_cap,
+        };
+        transfer::share_object(treasury_cap_holder);
     }
 
-    entry fun mint(treasury_cap: &mut TreasuryCap<CANDY>, amount: u64, ctx: &mut TxContext) {
+    entry fun mint(treasury_cap_holder: &mut CandyTreasuryCapHolder<CANDY>, amount: u64, ctx: &mut TxContext) {
+        let treasury_cap = &mut treasury_cap_holder.treasury_cap;
         coin::mint_and_transfer(treasury_cap, 1000, tx_context::sender(ctx), ctx);
     }
+        
 }
