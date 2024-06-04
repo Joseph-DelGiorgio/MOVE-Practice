@@ -21,6 +21,10 @@ module 0x123::sui_fren {
         treasury_cap: TreasuryCap<CANDY>,
     }
 
+    struct Fill has key {
+        id: uid
+    }
+
     entry fun mint(treasury_cap_holder: &mut CandyTreasuryCapHolder<CANDY>, amount: u64, ctx: &mut TxContext) {
         let treasury_cap = &mut treasury_cap_holder.treasury_cap;
         coin::mint_and_transfer(treasury_cap, 1000, tx_context::sender(ctx), ctx);
