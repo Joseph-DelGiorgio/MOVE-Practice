@@ -37,6 +37,7 @@ module dating_dapp::DatingDapp {
 
     /// Error codes
     const ENotOwner: u64 = 1;
+    const EProfileNotFound: u64 = 2;
 
     /// A user profile
     struct Profile has key, store {
@@ -46,6 +47,7 @@ module dating_dapp::DatingDapp {
         age: u64,
         gender: vector<u8>,
         preferences: vector<u8>,
+        liked_profiles: vector<UID>,
     }
 
     /// Match details
@@ -79,6 +81,7 @@ module dating_dapp::DatingDapp {
             age,
             gender,
             preferences,
+            liked_profiles: vector::empty(),
         };
         bag::add(&mut dapp.profiles, id, profile);
     }
@@ -95,6 +98,25 @@ module dating_dapp::DatingDapp {
         })
     }
 
+    /// Update an existing profile
+    public entry fun update_profile(
+        dapp: &mut DatingDapp,
+        profile_id: UID,
+        name: vector<u8>,
+        age: u64,
+        gender: vector<u8>,
+        preferences: vector<u8>,
+        ctx: &mut TxContext
+    ) {
+        let profile = bag::borrow_mut(&mut dapp.profiles, profile_id);
+        assert!(profile.owner == tx_context::sender(ctx), ENotOwner);
+        
+        profile.name = name;
+        profile.age = age;
+        profile.gender = gender;
+        profile.preferences = preferences;
+    }
+
     /// Function to like a profile (attempt to match)
     public entry fun like_profile(
         dapp: &mut DatingDapp,
@@ -102,15 +124,16 @@ module dating_dapp::DatingDapp {
         liked_profile_id: UID,
         ctx: &mut TxContext
     ) {
-        let liker_profile = bag::borrow(&dapp.profiles, liker_profile_id);
+        let liker_profile = bag::borrow_mut(&mut dapp.profiles, liker_profile_id);
         let liked_profile = bag::borrow(&dapp.profiles, liked_profile_id);
 
-        // Check if both profiles exist and belong to the sender
+        // Check if both profiles exist and liker belongs to the sender
         assert!(liker_profile.owner == tx_context::sender(ctx), ENotOwner);
-        
+
+        vector::push_back(&mut liker_profile.liked_profiles, liked_profile_id);
+
         // Simple match logic: if the liked profile likes the liker back, create a match
-        // Here, we could add more complex matching criteria based on profiles' preferences
-        if profile_likes_back(liked_profile, liker_profile) {
+        if vector::contains(&liked_profile.liked_profiles, liker_profile_id) {
             let match_id = object::new(ctx);
             let new_match = Match {
                 id: match_id,
@@ -121,15 +144,8 @@ module dating_dapp::DatingDapp {
         }
     }
 
-    /// Helper function to determine if a profile likes another profile back
-    fun profile_likes_back(liked_profile: &Profile, liker_profile: &Profile): bool {
-        // Add logic to check if liked_profile likes liker_profile back
-        // This can involve checking preferences, history, etc.
-        true
-    }
-
     /// View matches for a profile
-    public entry fun view_matches(
+    public fun view_matches(
         dapp: &DatingDapp,
         profile_id: UID,
     ): vector<Match> {
@@ -144,6 +160,21 @@ module dating_dapp::DatingDapp {
         profile_matches
     }
 
+    /// View profiles liked by the user
+    public fun view_liked_profiles(
+        dapp: &DatingDapp,
+        profile_id: UID,
+    ): vector<Profile> {
+        let profile = bag::borrow(&dapp.profiles, profile_id);
+        let mut liked_profiles = vector::empty<Profile>();
+
+        for liked_profile_id in &profile.liked_profiles {
+            let liked_profile = bag::borrow(&dapp.profiles, liked_profile_id);
+            vector::push_back(&mut liked_profiles, liked_profile);
+        }
+        liked_profiles
+    }
+
     /// Delete a profile
     public entry fun delete_profile(
         dapp: &mut DatingDapp,
@@ -154,5 +185,10 @@ module dating_dapp::DatingDapp {
         assert!(profile.owner == tx_context::sender(ctx), ENotOwner);
         bag::remove(&mut dapp.profiles, profile_id);
         object::delete(profile_id);
+    }
+
+    /// View all profiles
+    public fun view_all_profiles(dapp: &DatingDapp): vector<Profile> {
+        bag::values(&dapp.profiles)
     }
 }
