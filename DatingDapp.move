@@ -1,3 +1,33 @@
+/* imports:
+
+Added necessary imports for the Dapp's functionality.
+Error Codes:
+
+Defined an additional error code EProfileNotFound.
+Struct Definitions:
+
+Profile: Added a liked_profiles field to track profiles liked by the user.
+Match: No changes.
+DatingDapp: No changes.
+Functions:
+
+create_profile: Creates a new profile and initializes the liked_profiles field.
+create_dating_dapp: Creates a new DatingDapp instance.
+update_profile: Allows updating an existing profile's details.
+like_profile: Adds the liked profile's ID to the liked_profiles list of the liker. If the liked profile has already liked the liker, a match is created.
+view_matches: Retrieves matches for a given profile.
+view_liked_profiles: Retrieves profiles liked by a given profile.
+delete_profile: Deletes a profile if the sender is the owner.
+view_all_profiles: Retrieves all profiles in the Dapp.
+Enhancements
+Added functionality for updating profiles.
+Enhanced matching logic by storing and checking liked_profiles.
+Added functions to view profiles liked by the user and to view all profiles.
+Ensured proper error handling and ownership checks.
+
+*/
+
+
 module dating_dapp::DatingDapp {
     use sui::object::{Self, UID};
     use sui::tx_context::{Self, TxContext};
