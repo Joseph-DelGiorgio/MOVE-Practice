@@ -78,3 +78,18 @@ module PaymentApp {
         account_opt.borrow_mut().unwrap()
     }
 }
+
+/*
+Explanation
+Account Structure: Represents a user account with an owner address and a balance.
+PaymentApp Structure: Contains a vector of accounts.
+new_payment_app: Initializes a new payment application with an empty list of accounts.
+create_account: Allows a user to create an account in the payment application.
+deposit: Enables a user to deposit funds into their account by transferring the specified amount of SUI tokens to the payment application.
+transfer: Allows a user to transfer funds from their account to another user's account within the payment application.
+get_balance: Returns the balance of the user's account.
+find_account: Helper function to find an account by owner address.
+find_account_mut: Helper function to find a mutable reference to an account by owner address.
+*/
+
+
