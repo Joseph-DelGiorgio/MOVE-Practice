@@ -93,3 +93,76 @@ module VotingSystem::SecureElection {
         )
     }
 }
+
+
+/* V1 Election.move
+
+module election_2024::voting {
+    use sui::object::{Self, UID};
+    use sui::transfer;
+    use sui::tx_context::{Self, TxContext};
+    use sui::table::{Self, Table};
+
+    // Struct to represent a candidate
+    struct Candidate has key, store {
+        id: UID,
+        name: vector<u8>,
+        votes: u64
+    }
+
+    // Struct to represent the election
+    struct Election has key {
+        id: UID,
+        candidates: Table<vector<u8>, Candidate>,
+        is_active: bool
+    }
+
+    // Events
+    struct VoteCast has copy, drop {
+        voter: address,
+        candidate: vector<u8>
+    }
+
+    // Create a new election
+    public fun create_election(ctx: &mut TxContext) {
+        let election = Election {
+            id: object::new(ctx),
+            candidates: table::new(ctx),
+            is_active: true
+        };
+        transfer::share_object(election);
+    }
+
+    // Add a candidate to the election
+    public fun add_candidate(election: &mut Election, name: vector<u8>, ctx: &mut TxContext) {
+        assert!(election.is_active, 0);
+        let candidate = Candidate {
+            id: object::new(ctx),
+            name,
+            votes: 0
+        };
+        table::add(&mut election.candidates, name, candidate);
+    }
+
+    // Cast a vote for a candidate
+    public fun vote(election: &mut Election, candidate_name: vector<u8>, ctx: &TxContext) {
+        assert!(election.is_active, 0);
+        let candidate = table::borrow_mut(&mut election.candidates, candidate_name);
+        candidate.votes = candidate.votes + 1;
+        sui::event::emit(VoteCast { voter: tx_context::sender(ctx), candidate: candidate_name });
+    }
+
+    // End the election
+    public fun end_election(election: &mut Election) {
+        election.is_active = false;
+    }
+
+    // Get the number of votes for a candidate
+    public fun get_votes(election: &Election, candidate_name: vector<u8>): u64 {
+        let candidate = table::borrow(&election.candidates, candidate_name);
+        candidate.votes
+    }
+}
+
+*/
+
