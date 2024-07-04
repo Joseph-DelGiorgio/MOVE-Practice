@@ -126,3 +126,177 @@ module kentucky_derby::horse_race {
         race.race_finished
     }
 }
+
+//V2
+
+module KentuckyDerby::HorseRaceBetting {
+
+    use 0x1::Signer;
+    use 0x1::Event;
+    use 0x1::Vector;
+    use 0x1::Coin;
+
+    // Struct to store horse details
+    struct Horse has copy, drop, store {
+        name: vector<u8>,
+        number: u64,
+        distance_run: u64,
+        finished: bool
+    }
+
+    // Struct to store bet details
+    struct Bet has copy, drop, store {
+        bettor: address,
+        horse_number: u64,
+        amount: u64
+    }
+
+    // Event to signal the start of the race
+    struct RaceStarted has copy, drop, store {}
+
+    // Event to signal the end of the race and the winner
+    struct RaceFinished has copy, drop, store {
+        winner_number: u64
+    }
+
+    // Struct to store race state
+    struct RaceState has key {
+        horses: vector<Horse>,
+        race_distance: u64,
+        race_in_progress: bool,
+        winner_number: u64,
+        bets: vector<Bet>
+    }
+
+    // Initialize the race with a certain distance
+    public fun initialize_race(account: &signer, race_distance: u64): address {
+        let race = RaceState {
+            horses: Vector::empty<Horse>(),
+            race_distance,
+            race_in_progress: false,
+            winner_number: 0,
+            bets: Vector::empty<Bet>()
+        };
+        let race_address = move_to<RaceState>(account, race);
+        race_address
+    }
+
+    // Add a horse to the race
+    public fun add_horse(account: &signer, race_address: address, name: vector<u8>, number: u64) {
+        let race = borrow_global_mut<RaceState>(race_address);
+        assert!(!race.race_in_progress, 0, "Race is already in progress");
+        let horse = Horse {
+            name,
+            number,
+            distance_run: 0,
+            finished: false
+        };
+        Vector::push_back<Horse>(&mut race.horses, horse);
+    }
+
+    // Place a bet on a horse
+    public fun place_bet(account: &signer, race_address: address, horse_number: u64, amount: u64) {
+        let race = borrow_global_mut<RaceState>(race_address);
+        assert!(!race.race_in_progress, 0, "Race is already in progress");
+        
+        // Transfer the bet amount to the contract
+        Coin::burn_from<Coin>(Signer::address_of(account), amount);
+
+        let bet = Bet {
+            bettor: Signer::address_of(account),
+            horse_number,
+            amount
+        };
+        Vector::push_back<Bet>(&mut race.bets, bet);
+    }
+
+    // Start the race
+    public fun start_race(account: &signer, race_address: address) {
+        let race = borrow_global_mut<RaceState>(race_address);
+        assert!(Vector::length(&race.horses) >= 2, 0, "Need at least 2 horses to start the race");
+        assert!(!race.race_in_progress, 0, "Race is already in progress");
+        
+        race.race_in_progress = true;
+        Event::emit<RaceStarted>(&RaceStarted {});
+        
+        simulate_race(race_address);
+    }
+
+    // Simulate the race
+    fun simulate_race(race_address: address) {
+        let race = borrow_global_mut<RaceState>(race_address);
+        let winning_distance = race.race_distance;
+        
+        while (race.race_in_progress) {
+            let len = Vector::length(&race.horses);
+            let mut i = 0;
+            while (i < len) {
+                let horse = &mut Vector::borrow_mut<Horse>(&mut race.horses, i);
+                if (!horse.finished) {
+                    horse.distance_run = horse.distance_run + (Rand::rand() % 100);
+                    if (horse.distance_run >= winning_distance) {
+                        race.race_in_progress = false;
+                        race.winner_number = horse.number;
+                        horse.finished = true;
+                        Event::emit<RaceFinished>(&RaceFinished {
+                            winner_number: horse.number
+                        });
+                        distribute_rewards(race_address);
+                        break;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+    }
+
+    // Distribute rewards to the winning bets
+    fun distribute_rewards(race_address: address) {
+        let race = borrow_global_mut<RaceState>(race_address);
+        let winner_number = race.winner_number;
+        let mut total_bets = 0;
+        let mut total_winning_bets = 0;
+
+        // Calculate total bet amounts and total winning bet amounts
+        let len = Vector::length(&race.bets);
+        let mut i = 0;
+        while (i < len) {
+            let bet = &Vector::borrow<Bet>(&race.bets, i);
+            total_bets = total_bets + bet.amount;
+            if (bet.horse_number == winner_number) {
+                total_winning_bets = total_winning_bets + bet.amount;
+            }
+            i = i + 1;
+        }
+
+        // Distribute rewards to the winners
+        i = 0;
+        while (i < len) {
+            let bet = &Vector::borrow<Bet>(&race.bets, i);
+            if (bet.horse_number == winner_number) {
+                let reward = (bet.amount * total_bets) / total_winning_bets;
+                Coin::mint_to<Coin>(bet.bettor, reward);
+            }
+            i = i + 1;
+        }
+    }
+
+    // Get the winner of the race
+    public fun get_winner(race_address: address): vector<u8> {
+        let race = borrow_global<RaceState>(race_address);
+        assert!(!race.race_in_progress, 0, "Race is still in progress");
+        let len = Vector::length(&race.horses);
+        let mut i = 0;
+        while (i < len) {
+            let horse = &Vector::borrow<Horse>(&race.horses, i);
+            if (horse.number == race.winner_number) {
+                return horse.name;
+            }
+            i = i + 1;
+        }
+        vector::empty<u8>()
+    }
+}
+
+
+
