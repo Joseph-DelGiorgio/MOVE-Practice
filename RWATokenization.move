@@ -14,20 +14,19 @@ module natural_assets::advanced_rwa_tokenization {
     use sui::locked_coin::{Self, LockedCoin};
 
     // Define custom coin types
-    struct NAT {} // Natural Asset Token
-    struct CCT {} // Carbon Credit Token
-    struct USDC {} // Stablecoin for liquidity pools
+    struct NAT {}
+    struct CCT {}
+    struct USDC {}
 
-    // Struct to represent a Natural Asset
     struct NaturalAsset has key, store {
         id: UID,
         asset_type: String,
         name: String,
         location: String,
-        area: u64,  // in square kilometers
+        area: u64,
         token_supply: Balance<NAT>,
-        valuation: u64, // in USD
-        sustainability_score: u8, // 0-100
+        valuation: u64,
+        sustainability_score: u8,
         carbon_credits: Balance<CCT>,
         last_audit_timestamp: u64,
         regulatory_compliance: Table<String, bool>,
@@ -36,38 +35,65 @@ module natural_assets::advanced_rwa_tokenization {
         authorized_validators: VecSet<address>,
     }
 
-    // Liquidity Pool for NAT/USDC
     struct LiquidityPool has key {
         id: UID,
         nat_balance: Balance<NAT>,
         usdc_balance: Balance<USDC>,
         lp_tokens: Balance<LPT>,
-        fee_percentage: u64, // in basis points (1/10000)
+        fee_percentage: u64,
     }
 
-    // LP Token for the liquidity pool
     struct LPT has drop {}
 
-    // Capability for administering the system
     struct AdminCap has key { id: UID }
 
-    // Registry to keep track of all natural assets
     struct NaturalAssetRegistry has key {
         id: UID,
         assets: Table<ID, NaturalAsset>,
         total_valuation: u64,
         total_carbon_credits: u64,
         asset_count: u64,
+        usdc_mint_cap: TreasuryCap<USDC>, // Added USDC mint capability
     }
 
-    // Struct for asset valuation requests
     struct ValuationRequest has key {
         id: UID,
         asset_id: ID,
         requester: address,
-        status: String, // "Pending", "Approved", "Rejected"
+        status: String,
         proposed_valuation: u64,
         validator: Option<address>,
+    }
+
+    struct PriceOracle has key {
+        id: UID,
+        price: u64,
+        last_update: u64,
+    }
+
+    struct GovernanceProposal has key {
+        id: UID,
+        proposer: address,
+        description: String,
+        votes_for: u64,
+        votes_against: u64,
+        end_time: u64,
+    }
+
+    struct Loan has key {
+        id: UID,
+        borrower: address,
+        asset_id: ID,
+        amount: u64,
+        interest_rate: u64,
+        due_date: u64,
+        collateral: Balance<NAT>,
+    }
+
+    struct GlobalStorage has key {
+        id: UID,
+        paused: bool,
+        governance_tokens: Balance<NAT>,
     }
 
     // Events
@@ -124,32 +150,6 @@ module natural_assets::advanced_rwa_tokenization {
         is_nat_to_usdc: bool,
     }
 
- struct PriceOracle has key {
-        id: UID,
-        price: u64, // Price of NAT in USDC (6 decimal places)
-        last_update: u64,
-    }
-
-    struct GovernanceProposal has key {
-        id: UID,
-        proposer: address,
-        description: String,
-        votes_for: u64,
-        votes_against: u64,
-        end_time: u64,
-    }
-
-    struct Loan has key {
-        id: UID,
-        borrower: address,
-        asset_id: ID,
-        amount: u64,
-        interest_rate: u64,
-        due_date: u64,
-        collateral: Balance<NAT>,
-    }
-
-    // New events
     struct PriceUpdated has copy, drop {
         new_price: u64,
         timestamp: u64,
@@ -172,11 +172,6 @@ module natural_assets::advanced_rwa_tokenization {
         asset_id: ID,
         amount: u64,
     }
-    struct GlobalStorage has key {
-        id: UID,
-        paused: bool,
-        governance_tokens: Balance<NAT>,
-    }
 
     // Error codes
     const EInvalidAssetType: u64 = 0;
@@ -185,77 +180,61 @@ module natural_assets::advanced_rwa_tokenization {
     const EUnauthorized: u64 = 3;
     const EInvalidValuation: u64 = 4;
     const EInsufficientLiquidity: u64 = 5;
-    const ESlippageExceeded: u64 = 7;
-    const EEmergencyPaused: u64 = 8;
-    const EInsufficientCollateral: u64 = 9;
+    const ESlippageExceeded: u64 = 6;
+    const EEmergencyPaused: u64 = 7;
+    const EInsufficientCollateral: u64 = 8;
+    const ELoanNotDue: u64 = 9;
+    const EInvalidAmount: u64 = 10;
 
-
-    // Initialize the module
     fun init(ctx: &mut TxContext) {
-        // Create and share the registry
         transfer::share_object(NaturalAssetRegistry {
             id: object::new(ctx),
             assets: table::new(ctx),
             total_valuation: 0,
             total_carbon_credits: 0,
             asset_count: 0,
+            usdc_mint_cap: create_usdc_cap(ctx),
         });
 
-        // Create and transfer the admin capability
         transfer::transfer(AdminCap {
             id: object::new(ctx)
         }, tx_context::sender(ctx));
 
-        // Initialize NAT
-        let (treasury_cap, metadata) = coin::create_currency(
-            NAT {},
-            9, // Decimals
-            b"NAT", // Symbol
-            b"Natural Asset Token", // Name
-            b"Token representing ownership in natural assets", // Description
-            option::none(), // Icon URL
-            ctx
-        );
+        let (treasury_cap, metadata) = coin::create_currency(NAT {}, 9, b"NAT", b"Natural Asset Token", b"Token representing ownership in natural assets", option::none(), ctx);
         transfer::public_freeze_object(metadata);
         transfer::public_transfer(treasury_cap, tx_context::sender(ctx));
 
-        // Initialize CCT
-        let (cc_treasury_cap, cc_metadata) = coin::create_currency(
-            CCT {},
-            6, // Decimals
-            b"CCT", // Symbol
-            b"Carbon Credit Token", // Name
-            b"Token representing carbon credits", // Description
-            option::none(), // Icon URL
-            ctx
-        );
+        let (cc_treasury_cap, cc_metadata) = coin::create_currency(CCT {}, 6, b"CCT", b"Carbon Credit Token", b"Token representing carbon credits", option::none(), ctx);
         transfer::public_freeze_object(cc_metadata);
         transfer::public_transfer(cc_treasury_cap, tx_context::sender(ctx));
 
-        // Create and share the liquidity pool
         transfer::share_object(LiquidityPool {
             id: object::new(ctx),
             nat_balance: balance::zero(),
             usdc_balance: balance::zero(),
             lp_tokens: balance::zero(),
-            fee_percentage: 30, // 0.3% fee
+            fee_percentage: 30,
+        });
+
+        transfer::share_object(GlobalStorage {
+            id: object::new(ctx),
+            paused: false,
+            governance_tokens: balance::zero(),
+        });
+
+        transfer::share_object(PriceOracle {
+            id: object::new(ctx),
+            price: 1000000, // Initial price of 1 NAT = 1 USDC
+            last_update: 0,
         });
     }
 
-    // Price Oracle functions
-    public fun update_price(oracle: &mut PriceOracle, new_price: u64, clock: &Clock) {
-        oracle.price = new_price;
-        oracle.last_update = clock::timestamp_ms(clock);
-        event::emit(PriceUpdated { new_price, timestamp: oracle.last_update });
+    fun create_usdc_cap(ctx: &mut TxContext): TreasuryCap<USDC> {
+        let (treasury_cap, metadata) = coin::create_currency(USDC {}, 6, b"USDC", b"USD Coin", b"Stablecoin for liquidity pools", option::none(), ctx);
+        transfer::public_freeze_object(metadata);
+        treasury_cap
     }
 
-    public fun get_price(oracle: &PriceOracle): (u64, u64) {
-        (oracle.price, oracle.last_update)
-    }
-
-
-
-    // Function to tokenize a new natural asset
     public fun tokenize_asset(
         registry: &mut NaturalAssetRegistry,
         treasury_cap: &mut TreasuryCap<NAT>,
@@ -279,8 +258,9 @@ module natural_assets::advanced_rwa_tokenization {
         );
 
         assert!(initial_sustainability_score <= 100, EInvalidScore);
+        assert!(initial_valuation > 0, EInvalidValuation);
 
-        let token_supply = (initial_valuation / 100) as u64; // 1 token = $100 of value
+        let token_supply = (initial_valuation / 100) as u64;
 
         let asset = NaturalAsset {
             id: object::new(ctx),
@@ -299,7 +279,6 @@ module natural_assets::advanced_rwa_tokenization {
             authorized_validators: vec_set::empty(),
         };
 
-        // Mint tokens for the asset
         coin::mint_balance(treasury_cap, token_supply, &mut asset.token_supply);
 
         let asset_id = object::id(&asset);
@@ -316,8 +295,8 @@ module natural_assets::advanced_rwa_tokenization {
         });
     }
 
-    // Function to update asset valuation
     public fun update_valuation(
+        _: &AdminCap,
         registry: &mut NaturalAssetRegistry,
         asset_id: ID,
         new_valuation: u64,
@@ -326,6 +305,7 @@ module natural_assets::advanced_rwa_tokenization {
     ) {
         let asset = table::borrow_mut(&mut registry.assets, asset_id);
         assert!(vec_set::contains(&asset.authorized_validators, &validator), EUnauthorized);
+        assert!(new_valuation > 0, EInvalidValuation);
 
         let old_valuation = asset.valuation;
         asset.valuation = new_valuation;
@@ -341,8 +321,8 @@ module natural_assets::advanced_rwa_tokenization {
         });
     }
 
-    // Function to update sustainability score
     public fun update_sustainability_score(
+        _: &AdminCap,
         registry: &mut NaturalAssetRegistry,
         asset_id: ID,
         new_score: u8,
@@ -362,8 +342,8 @@ module natural_assets::advanced_rwa_tokenization {
         });
     }
 
-    // Function to issue carbon credits
     public fun issue_carbon_credits(
+        _: &AdminCap,
         registry: &mut NaturalAssetRegistry,
         cc_treasury_cap: &mut TreasuryCap<CCT>,
         asset_id: ID,
@@ -371,6 +351,7 @@ module natural_assets::advanced_rwa_tokenization {
         validator: address,
         ctx: &mut TxContext
     ) {
+        assert!(amount > 0, EInvalidAmount);
         let asset = table::borrow_mut(&mut registry.assets, asset_id);
         assert!(vec_set::contains(&asset.authorized_validators, &validator), EUnauthorized);
 
@@ -383,7 +364,6 @@ module natural_assets::advanced_rwa_tokenization {
         });
     }
 
-    // Function to add liquidity to the NAT/USDC pool
     public fun add_liquidity(
         pool: &mut LiquidityPool,
         nat_amount: Coin<NAT>,
@@ -392,11 +372,11 @@ module natural_assets::advanced_rwa_tokenization {
     ): Coin<LPT> {
         let nat_value = coin::value(&nat_amount);
         let usdc_value = coin::value(&usdc_amount);
+        assert!(nat_value > 0 && usdc_value > 0, EInvalidAmount);
 
         balance::join(&mut pool.nat_balance, coin::into_balance(nat_amount));
         balance::join(&mut pool.usdc_balance, coin::into_balance(usdc_amount));
 
-        // Mint LP tokens (simplified calculation)
         let lp_amount = (nat_value + usdc_value) / 2;
         let lp_tokens = balance::split(&mut pool.lp_tokens, lp_amount);
 
@@ -410,13 +390,13 @@ module natural_assets::advanced_rwa_tokenization {
         coin::from_balance(lp_tokens, ctx)
     }
 
-    // Function to remove liquidity from the NAT/USDC pool
     public fun remove_liquidity(
         pool: &mut LiquidityPool,
         lp_tokens: Coin<LPT>,
         ctx: &mut TxContext
     ): (Coin<NAT>, Coin<USDC>) {
         let lp_amount = coin::value(&lp_tokens);
+        assert!(lp_amount > 0, EInvalidAmount);
         balance::join(&mut pool.lp_tokens, coin::into_balance(lp_tokens));
 
         let total_lp = balance::value(&pool.lp_tokens);
@@ -436,30 +416,6 @@ module natural_assets::advanced_rwa_tokenization {
         )
     }
 
-    // Function to swap NAT for USDC
-    public fun swap_nat_for_usdc(
-        pool: &mut LiquidityPool,
-        nat_in: Coin<NAT>,
-        min_usdc_out: u64,
-        ctx: &mut TxContext
-    ): Coin<USDC> {
-        let nat_amount = coin::value(&nat_in);
-        balance::join(&mut pool.nat_balance, coin::into_balance(nat_in));
-
-        let (usdc_out, _) = calculate_swap(pool, nat_amount, true);
-        assert!(usdc_out >= min_usdc_out, ESlippageExceeded);
-
-        event::emit(Swap {
-            trader: tx_context::sender(ctx),
-            nat_amount,
-            usdc_amount: usdc_out,
-            is_nat_to_usdc: true,
-        });
-
-        coin::from_balance(balance::split(&mut pool.usdc_balance, usdc_out), ctx)
-    }
-
-     // Improved swap function with slippage protection
     public fun swap_nat_for_usdc(
         pool: &mut LiquidityPool,
         oracle: &PriceOracle,
@@ -470,17 +426,18 @@ module natural_assets::advanced_rwa_tokenization {
         ctx: &mut TxContext
     ): Coin<USDC> {
         let (current_price, last_update) = get_price(oracle);
-        assert!(clock::timestamp_ms(clock) - last_update <= 3600000, ESlippageExceeded); // Price must be from last hour
+        assert!(clock::timestamp_ms(clock) - last_update <= 3600000, ESlippageExceeded);
 
         let nat_amount = coin::value(&nat_in);
-        let expected_usdc_out = (nat_amount * current_price) / 1000000; // Assuming 6 decimal places for price
+        assert!(nat_amount > 0, EInvalidAmount);
+        let expected_usdc_out = (nat_amount * current_price) / 1000000;
         let min_acceptable = (expected_usdc_out * (10000 - max_slippage)) / 10000;
         
         assert!(min_acceptable >= min_usdc_out, ESlippageExceeded);
 
         balance::join(&mut pool.nat_balance, coin::into_balance(nat_in));
 
-        let (usdc_out, fee) = calculate_swap(pool, nat_amount, true);
+        let (usdc_out, _) = calculate_swap(pool, nat_amount, true);
         assert!(usdc_out >= min_acceptable, ESlippageExceeded);
 
         event::emit(Swap {
@@ -493,12 +450,10 @@ module natural_assets::advanced_rwa_tokenization {
         coin::from_balance(balance::split(&mut pool.usdc_balance, usdc_out), ctx)
     }
 
-    // Emergency pause mechanism
     public fun toggle_pause(_admin_cap: &AdminCap, storage: &mut GlobalStorage) {
         storage.paused = !storage.paused;
     }
 
-    // Vesting schedule for token distribution
     public fun create_vested_tokens(
         treasury_cap: &mut TreasuryCap<NAT>,
         amount: u64,
@@ -507,6 +462,7 @@ module natural_assets::advanced_rwa_tokenization {
         clock: &Clock,
         ctx: &mut TxContext
     ): LockedCoin<NAT> {
+        assert!(amount > 0, EInvalidAmount);
         let coins = coin::mint(treasury_cap, amount, ctx);
         locked_coin::new_with_vesting_schedule(
             coins,
@@ -517,14 +473,15 @@ module natural_assets::advanced_rwa_tokenization {
         )
     }
 
-    // Governance functions
     public fun create_proposal(
+        _: &AdminCap,
         storage: &mut GlobalStorage,
         description: String,
         voting_period: u64,
         clock: &Clock,
         ctx: &mut TxContext
     ) {
+        assert!(!storage.paused, EEmergencyPaused);
         let proposal = GovernanceProposal {
             id: object::new(ctx),
             proposer: tx_context::sender(ctx),
@@ -546,8 +503,10 @@ module natural_assets::advanced_rwa_tokenization {
         clock: &Clock,
         ctx: &mut TxContext
     ) {
+        assert!(!storage.paused, EEmergencyPaused);
         assert!(clock::timestamp_ms(clock) <= proposal.end_time, EInvalidValuation);
         let vote_amount = coin::value(&voting_power);
+        assert!(vote_amount > 0, EInvalidAmount);
         balance::join(&mut storage.governance_tokens, coin::into_balance(voting_power));
 
         if (in_favor) {
@@ -563,7 +522,6 @@ module natural_assets::advanced_rwa_tokenization {
         });
     }
 
-    // Asset-backed loans
     public fun create_loan(
         registry: &mut NaturalAssetRegistry,
         asset_id: ID,
@@ -576,7 +534,8 @@ module natural_assets::advanced_rwa_tokenization {
     ): Coin<USDC> {
         let asset = table::borrow(&registry.assets, asset_id);
         let collateral_value = coin::value(&collateral);
-        assert!(collateral_value >= amount * 15 / 10, EInsufficientCollateral); // Require 150% collateralization
+        assert!(collateral_value >= amount * 15 / 10, EInsufficientCollateral);
+        assert!(amount > 0, EInvalidAmount);
 
         let loan = Loan {
             id: object::new(ctx),
@@ -596,59 +555,46 @@ module natural_assets::advanced_rwa_tokenization {
             amount,
         });
 
-        // Mint USDC for the loan (assuming we have permission to do so)
         coin::mint(&mut registry.usdc_mint_cap, amount, ctx)
     }
 
-    // Batch processing function for efficiency
-    public fun batch_update_assets(
+    public fun repay_loan(
         registry: &mut NaturalAssetRegistry,
-        asset_ids: vector<ID>,
-        new_valuations: vector<u64>,
-        new_sustainability_scores: vector<u8>,
-        validator: address,
+        loan: &mut Loan,
+        repayment: Coin<USDC>,
+        clock: &Clock,
         ctx: &mut TxContext
-    ) {
-        assert!(vector::length(&asset_ids) == vector::length(&new_valuations), EInvalidValuation);
-        assert!(vector::length(&asset_ids) == vector::length(&new_sustainability_scores), EInvalidValuation);
+    ): Coin<NAT> {
+        assert!(clock::timestamp_ms(clock) <= loan.due_date, ELoanNotDue);
+        let repayment_amount = coin::value(&repayment);
+        assert!(repayment_amount >= loan.amount, EInsufficientTokens);
 
-        let i = 0;
-        let len = vector::length(&asset_ids);
-        while (i < len) {
-            let asset_id = *vector::borrow(&asset_ids, i);
-            let new_valuation = *vector::borrow(&new_valuations, i);
-            let new_score = *vector::borrow(&new_sustainability_scores, i);
+        // Burn the USDC repayment
+        coin::burn(&mut registry.usdc_mint_cap, repayment);
 
-            update_valuation(registry, asset_id, new_valuation, validator, ctx);
-            update_sustainability_score(registry, asset_id, new_score, validator);
-
-            i = i + 1;
-        }
+        // Return the collateral
+        coin::from_balance(balance::withdraw_all(&mut loan.collateral), ctx)
     }
 
-    // Internal function to calculate swap amounts
-    fun calculate_swap(pool: &LiquidityPool, amount_in: u64, is_nat_to_usdc: bool): (u64, u64) {
-        let (reserve_in, reserve_out) = if (is_nat_to_usdc) {
-            (balance::value(&pool.nat_balance), balance::value(&pool.usdc_balance))
-        } else {
-            (balance::value(&pool.usdc_balance), balance::value(&pool.nat_balance))
-        };
-
-        let amount_in_with_fee = amount_in * (10000 - pool.fee_percentage);
-        let numerator = amount_in_with_fee * reserve_out;
-        let denominator = (reserve_in * 10000) + amount_in_with_fee;
-        let amount_out = numerator / denominator;
-
-        (amount_out, amount_in - amount_out)
+    public fun update_price(oracle: &mut PriceOracle, new_price: u64, clock: &Clock) {
+        assert!(new_price > 0, EInvalidAmount);
+        oracle.price = new_price;
+        oracle.last_update = clock::timestamp_ms(clock);
+        event::emit(PriceUpdated { new_price, timestamp: oracle.last_update });
     }
 
-// Function to update fractional ownership
+    public fun get_price(oracle: &PriceOracle): (u64, u64) {
+        (oracle.price, oracle.last_update)
+    }
+
     public fun update_fractional_ownership(
+        _: &AdminCap,
         asset: &mut NaturalAsset,
         owner: address,
         amount: u64,
         ctx: &mut TxContext
     ) {
+        assert!(amount > 0, EInvalidAmount);
         if (table::contains(&asset.fractional_ownership, owner)) {
             let current_amount = table::remove(&mut asset.fractional_ownership, owner);
             table::add(&mut asset.fractional_ownership, owner, current_amount + amount);
@@ -663,7 +609,6 @@ module natural_assets::advanced_rwa_tokenization {
         });
     }
 
-    // Function to get fractional ownership details
     public fun get_fractional_ownership(asset: &NaturalAsset, owner: address): u64 {
         if (table::contains(&asset.fractional_ownership, owner)) {
             *table::borrow(&asset.fractional_ownership, owner)
@@ -672,9 +617,8 @@ module natural_assets::advanced_rwa_tokenization {
         }
     }
 
-    // Function to update asset metadata
     public fun update_asset_metadata(
-        _admin_cap: &AdminCap,
+        _: &AdminCap,
         asset: &mut NaturalAsset,
         key: String,
         value: String,
@@ -682,37 +626,32 @@ module natural_assets::advanced_rwa_tokenization {
         vec_map::insert(&mut asset.metadata, key, value);
     }
 
-    // Function to get asset metadata
     public fun get_asset_metadata(asset: &NaturalAsset, key: &String): Option<String> {
         vec_map::get(&asset.metadata, key)
     }
 
-    // Function to add authorized validator
     public fun add_authorized_validator(
-        _admin_cap: &AdminCap,
+        _: &AdminCap,
         asset: &mut NaturalAsset,
         validator: address,
     ) {
         vec_set::insert(&mut asset.authorized_validators, validator);
     }
 
-    // Function to remove authorized validator
     public fun remove_authorized_validator(
-        _admin_cap: &AdminCap,
+        _: &AdminCap,
         asset: &mut NaturalAsset,
         validator: address,
     ) {
         vec_set::remove(&mut asset.authorized_validators, &validator);
     }
 
-    // Function to check if a validator is authorized
     public fun is_authorized_validator(asset: &NaturalAsset, validator: address): bool {
         vec_set::contains(&asset.authorized_validators, &validator)
     }
 
-    // Function to update liquidity pool fee
     public fun update_pool_fee(
-        _admin_cap: &AdminCap,
+        _: &AdminCap,
         pool: &mut LiquidityPool,
         new_fee_percentage: u64,
     ) {
@@ -720,7 +659,6 @@ module natural_assets::advanced_rwa_tokenization {
         pool.fee_percentage = new_fee_percentage;
     }
 
-    // Function to get pool details
     public fun get_pool_details(pool: &LiquidityPool): (u64, u64, u64, u64) {
         (
             balance::value(&pool.nat_balance),
@@ -730,7 +668,6 @@ module natural_assets::advanced_rwa_tokenization {
         )
     }
 
-    // Function to get asset details
     public fun get_asset_details(asset: &NaturalAsset): (String, String, String, u64, u64, u64, u8, u64) {
         (
             asset.asset_type,
@@ -744,14 +681,12 @@ module natural_assets::advanced_rwa_tokenization {
         )
     }
 
-    // Function to check regulatory compliance
     public fun check_compliance(asset: &NaturalAsset, regulation: vector<u8>): bool {
         *table::borrow(&asset.regulatory_compliance, utf8(regulation))
     }
 
-    // Function to update regulatory compliance
     public fun update_regulatory_compliance(
-        _admin_cap: &AdminCap,
+        _: &AdminCap,
         asset: &mut NaturalAsset,
         regulation: vector<u8>,
         is_compliant: bool,
@@ -759,10 +694,23 @@ module natural_assets::advanced_rwa_tokenization {
         table::upsert(&mut asset.regulatory_compliance, utf8(regulation), is_compliant);
     }
 
-    
-    // Function to get total statistics from the registry
     public fun get_registry_stats(registry: &NaturalAssetRegistry): (u64, u64, u64) {
         (registry.total_valuation, registry.total_carbon_credits, registry.asset_count)
+    }
+
+    fun calculate_swap(pool: &LiquidityPool, amount_in: u64, is_nat_to_usdc: bool): (u64, u64) {
+        let (reserve_in, reserve_out) = if (is_nat_to_usdc) {
+            (balance::value(&pool.nat_balance), balance::value(&pool.usdc_balance))
+        } else {
+            (balance::value(&pool.usdc_balance), balance::value(&pool.nat_balance))
+        };
+
+        let amount_in_with_fee = amount_in * (10000 - pool.fee_percentage);
+        let numerator = amount_in_with_fee * reserve_out;
+        let denominator = (reserve_in * 10000) + amount_in_with_fee;
+        let amount_out = numerator / denominator;
+
+        (amount_out, amount_in - amount_out)
     }
 }
 
