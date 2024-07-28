@@ -11,6 +11,7 @@ module natural_assets::advanced_rwa_tokenization {
     use std::option::{Self, Option};
     use sui::vec_map::{Self, VecMap};
     use sui::vec_set::{Self, VecSet};
+    use sui::locked_coin::{Self, LockedCoin};
 
     // Define custom coin types
     struct NAT {} // Natural Asset Token
@@ -123,6 +124,60 @@ module natural_assets::advanced_rwa_tokenization {
         is_nat_to_usdc: bool,
     }
 
+ struct PriceOracle has key {
+        id: UID,
+        price: u64, // Price of NAT in USDC (6 decimal places)
+        last_update: u64,
+    }
+
+    struct GovernanceProposal has key {
+        id: UID,
+        proposer: address,
+        description: String,
+        votes_for: u64,
+        votes_against: u64,
+        end_time: u64,
+    }
+
+    struct Loan has key {
+        id: UID,
+        borrower: address,
+        asset_id: ID,
+        amount: u64,
+        interest_rate: u64,
+        due_date: u64,
+        collateral: Balance<NAT>,
+    }
+
+    // New events
+    struct PriceUpdated has copy, drop {
+        new_price: u64,
+        timestamp: u64,
+    }
+
+    struct ProposalCreated has copy, drop {
+        proposal_id: ID,
+        description: String,
+    }
+
+    struct ProposalVoted has copy, drop {
+        proposal_id: ID,
+        voter: address,
+        in_favor: bool,
+    }
+
+    struct LoanCreated has copy, drop {
+        loan_id: ID,
+        borrower: address,
+        asset_id: ID,
+        amount: u64,
+    }
+    struct GlobalStorage has key {
+        id: UID,
+        paused: bool,
+        governance_tokens: Balance<NAT>,
+    }
+
     // Error codes
     const EInvalidAssetType: u64 = 0;
     const EInsufficientTokens: u64 = 1;
@@ -130,7 +185,10 @@ module natural_assets::advanced_rwa_tokenization {
     const EUnauthorized: u64 = 3;
     const EInvalidValuation: u64 = 4;
     const EInsufficientLiquidity: u64 = 5;
-    const ESlippageExceeded: u64 = 6;
+    const ESlippageExceeded: u64 = 7;
+    const EEmergencyPaused: u64 = 8;
+    const EInsufficientCollateral: u64 = 9;
+
 
     // Initialize the module
     fun init(ctx: &mut TxContext) {
@@ -183,6 +241,19 @@ module natural_assets::advanced_rwa_tokenization {
             fee_percentage: 30, // 0.3% fee
         });
     }
+
+    // Price Oracle functions
+    public fun update_price(oracle: &mut PriceOracle, new_price: u64, clock: &Clock) {
+        oracle.price = new_price;
+        oracle.last_update = clock::timestamp_ms(clock);
+        event::emit(PriceUpdated { new_price, timestamp: oracle.last_update });
+    }
+
+    public fun get_price(oracle: &PriceOracle): (u64, u64) {
+        (oracle.price, oracle.last_update)
+    }
+
+
 
     // Function to tokenize a new natural asset
     public fun tokenize_asset(
@@ -388,27 +459,171 @@ module natural_assets::advanced_rwa_tokenization {
         coin::from_balance(balance::split(&mut pool.usdc_balance, usdc_out), ctx)
     }
 
-    // Function to swap USDC for NAT
-    public fun swap_usdc_for_nat(
+     // Improved swap function with slippage protection
+    public fun swap_nat_for_usdc(
         pool: &mut LiquidityPool,
-        usdc_in: Coin<USDC>,
-        min_nat_out: u64,
+        oracle: &PriceOracle,
+        nat_in: Coin<NAT>,
+        min_usdc_out: u64,
+        max_slippage: u64,
+        clock: &Clock,
         ctx: &mut TxContext
-    ): Coin<NAT> {
-        let usdc_amount = coin::value(&usdc_in);
-        balance::join(&mut pool.usdc_balance, coin::into_balance(usdc_in));
+    ): Coin<USDC> {
+        let (current_price, last_update) = get_price(oracle);
+        assert!(clock::timestamp_ms(clock) - last_update <= 3600000, ESlippageExceeded); // Price must be from last hour
 
-        let (nat_out, _) = calculate_swap(pool, usdc_amount, false);
-        assert!(nat_out >= min_nat_out, ESlippageExceeded);
+        let nat_amount = coin::value(&nat_in);
+        let expected_usdc_out = (nat_amount * current_price) / 1000000; // Assuming 6 decimal places for price
+        let min_acceptable = (expected_usdc_out * (10000 - max_slippage)) / 10000;
+        
+        assert!(min_acceptable >= min_usdc_out, ESlippageExceeded);
+
+        balance::join(&mut pool.nat_balance, coin::into_balance(nat_in));
+
+        let (usdc_out, fee) = calculate_swap(pool, nat_amount, true);
+        assert!(usdc_out >= min_acceptable, ESlippageExceeded);
 
         event::emit(Swap {
             trader: tx_context::sender(ctx),
-            nat_amount: nat_out,
-            usdc_amount,
-            is_nat_to_usdc: false,
+            nat_amount,
+            usdc_amount: usdc_out,
+            is_nat_to_usdc: true,
         });
 
-        coin::from_balance(balance::split(&mut pool.nat_balance, nat_out), ctx)
+        coin::from_balance(balance::split(&mut pool.usdc_balance, usdc_out), ctx)
+    }
+
+    // Emergency pause mechanism
+    public fun toggle_pause(_admin_cap: &AdminCap, storage: &mut GlobalStorage) {
+        storage.paused = !storage.paused;
+    }
+
+    // Vesting schedule for token distribution
+    public fun create_vested_tokens(
+        treasury_cap: &mut TreasuryCap<NAT>,
+        amount: u64,
+        recipient: address,
+        vesting_period: u64,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ): LockedCoin<NAT> {
+        let coins = coin::mint(treasury_cap, amount, ctx);
+        locked_coin::new_with_vesting_schedule(
+            coins,
+            recipient,
+            vesting_period,
+            clock::timestamp_ms(clock) + vesting_period,
+            ctx
+        )
+    }
+
+    // Governance functions
+    public fun create_proposal(
+        storage: &mut GlobalStorage,
+        description: String,
+        voting_period: u64,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        let proposal = GovernanceProposal {
+            id: object::new(ctx),
+            proposer: tx_context::sender(ctx),
+            description,
+            votes_for: 0,
+            votes_against: 0,
+            end_time: clock::timestamp_ms(clock) + voting_period,
+        };
+        let proposal_id = object::id(&proposal);
+        transfer::share_object(proposal);
+        event::emit(ProposalCreated { proposal_id, description });
+    }
+
+    public fun vote_on_proposal(
+        storage: &mut GlobalStorage,
+        proposal: &mut GovernanceProposal,
+        in_favor: bool,
+        voting_power: Coin<NAT>,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        assert!(clock::timestamp_ms(clock) <= proposal.end_time, EInvalidValuation);
+        let vote_amount = coin::value(&voting_power);
+        balance::join(&mut storage.governance_tokens, coin::into_balance(voting_power));
+
+        if (in_favor) {
+            proposal.votes_for = proposal.votes_for + vote_amount;
+        } else {
+            proposal.votes_against = proposal.votes_against + vote_amount;
+        };
+
+        event::emit(ProposalVoted {
+            proposal_id: object::id(proposal),
+            voter: tx_context::sender(ctx),
+            in_favor,
+        });
+    }
+
+    // Asset-backed loans
+    public fun create_loan(
+        registry: &mut NaturalAssetRegistry,
+        asset_id: ID,
+        amount: u64,
+        interest_rate: u64,
+        duration: u64,
+        collateral: Coin<NAT>,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ): Coin<USDC> {
+        let asset = table::borrow(&registry.assets, asset_id);
+        let collateral_value = coin::value(&collateral);
+        assert!(collateral_value >= amount * 15 / 10, EInsufficientCollateral); // Require 150% collateralization
+
+        let loan = Loan {
+            id: object::new(ctx),
+            borrower: tx_context::sender(ctx),
+            asset_id,
+            amount,
+            interest_rate,
+            due_date: clock::timestamp_ms(clock) + duration,
+            collateral: coin::into_balance(collateral),
+        };
+
+        transfer::share_object(loan);
+        event::emit(LoanCreated {
+            loan_id: object::id(&loan),
+            borrower: tx_context::sender(ctx),
+            asset_id,
+            amount,
+        });
+
+        // Mint USDC for the loan (assuming we have permission to do so)
+        coin::mint(&mut registry.usdc_mint_cap, amount, ctx)
+    }
+
+    // Batch processing function for efficiency
+    public fun batch_update_assets(
+        registry: &mut NaturalAssetRegistry,
+        asset_ids: vector<ID>,
+        new_valuations: vector<u64>,
+        new_sustainability_scores: vector<u8>,
+        validator: address,
+        ctx: &mut TxContext
+    ) {
+        assert!(vector::length(&asset_ids) == vector::length(&new_valuations), EInvalidValuation);
+        assert!(vector::length(&asset_ids) == vector::length(&new_sustainability_scores), EInvalidValuation);
+
+        let i = 0;
+        let len = vector::length(&asset_ids);
+        while (i < len) {
+            let asset_id = *vector::borrow(&asset_ids, i);
+            let new_valuation = *vector::borrow(&new_valuations, i);
+            let new_score = *vector::borrow(&new_sustainability_scores, i);
+
+            update_valuation(registry, asset_id, new_valuation, validator, ctx);
+            update_sustainability_score(registry, asset_id, new_score, validator);
+
+            i = i + 1;
+        }
     }
 
     // Internal function to calculate swap amounts
