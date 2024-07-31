@@ -177,3 +177,23 @@ module prison_transfer::money_transfer {
         balance::value(&wallet.balance)
     }
 }
+
+
+/*
+
+KYC/AML checks: A basic KYC status is added to each wallet. Transactions require completed KYC.
+Integration with prison financial systems: A PrisonFinancialSystem struct is added with functions to update inmate balances.
+More robust error handling: Additional error codes and assertions are added throughout the contract.
+Fee management: A FeeManager struct is introduced to handle transaction fees.
+Escrow functionality: An Escrow struct and associated functions allow for time-locked transfers.
+
+Additional notes:
+
+This contract uses coin::mint_for_testing in some places. In a production environment, you'd need to replace this with actual fund transfers.
+The KYC process is greatly simplified. In reality, this would involve off-chain processes and potentially oracle integration.
+The integration with prison financial systems is basic. You'd need to expand this based on the specific requirements and APIs of the prison systems.
+Error handling could be further improved with more specific error messages and codes.
+The escrow system could be expanded to include more complex conditions for release.
+
+*/
+
