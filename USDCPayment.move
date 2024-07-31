@@ -7,6 +7,7 @@ module prison_transfer::money_transfer {
     use sui::balance::{Self, Balance};
     use sui::event;
     use sui::clock::{Self, Clock};
+    use sui::table::{Self, Table};
 
     // Errors
     const EInsufficientBalance: u64 = 0;
@@ -14,12 +15,15 @@ module prison_transfer::money_transfer {
     const EKYCNotCompleted: u64 = 2;
     const EUnauthorized: u64 = 3;
     const EEscrowNotReady: u64 = 4;
+    const ETransferLimitExceeded: u64 = 5;
+    const EInvalidPrisonID: u64 = 6;
 
     // Events
     struct TransferEvent has copy, drop {
         from: address,
         to: address,
         amount: u64,
+        prison_id: Option<u64>,
     }
 
     // Structs
@@ -28,11 +32,15 @@ module prison_transfer::money_transfer {
         balance: Balance<SUI>,
         owner: address,
         kyc_status: bool,
+        monthly_transfer_limit: u64,
+        monthly_transfer_total: u64,
+        last_transfer_month: u64,
     }
 
     struct PrisonFinancialSystem has key {
         id: UID,
         admin: address,
+        prison_accounts: Table<u64, address>, // prison_id to prison wallet address
     }
 
     struct Escrow has key {
@@ -50,12 +58,15 @@ module prison_transfer::money_transfer {
     }
 
     // Functions
-    public fun create_wallet(ctx: &mut TxContext) {
+    public fun create_wallet(monthly_limit: u64, ctx: &mut TxContext) {
         let wallet = Wallet {
             id: object::new(ctx),
             balance: balance::zero(),
             owner: tx_context::sender(ctx),
             kyc_status: false,
+            monthly_transfer_limit: monthly_limit,
+            monthly_transfer_total: 0,
+            last_transfer_month: 0,
         };
         transfer::transfer(wallet, tx_context::sender(ctx));
     }
@@ -73,6 +84,7 @@ module prison_transfer::money_transfer {
             from: tx_context::sender(ctx),
             to: wallet.owner,
             amount,
+            prison_id: option::none(),
         });
     }
 
@@ -86,27 +98,50 @@ module prison_transfer::money_transfer {
             from: wallet.owner,
             to: tx_context::sender(ctx),
             amount,
+            prison_id: option::none(),
         });
         coin
     }
 
-    public fun transfer(
+    public fun transfer_to_prison(
         from: &mut Wallet,
-        to: &mut Wallet,
+        prison_system: &PrisonFinancialSystem,
+        prison_id: u64,
         amount: u64,
         fee_manager: &mut FeeManager,
+        clock: &Clock,
         ctx: &mut TxContext
     ) {
-        assert!(from.kyc_status && to.kyc_status, EKYCNotCompleted);
+        assert!(from.kyc_status, EKYCNotCompleted);
+        assert!(table::contains(&prison_system.prison_accounts, prison_id), EInvalidPrisonID);
+
+        // Check and update monthly transfer limit
+        let current_month = clock::timestamp_ms(clock) / (30 * 24 * 60 * 60 * 1000);
+        if (from.last_transfer_month != current_month) {
+            from.monthly_transfer_total = 0;
+            from.last_transfer_month = current_month;
+        }
+        assert!(from.monthly_transfer_total + amount <= from.monthly_transfer_limit, ETransferLimitExceeded);
+        from.monthly_transfer_total = from.monthly_transfer_total + amount;
+
         let fee_amount = (amount * fee_manager.fee_percentage) / 10000;
         let transfer_amount = amount - fee_amount;
 
         let transfer_coin = withdraw(from, transfer_amount, ctx);
-        deposit(to, transfer_coin, ctx);
+        let prison_wallet_address = *table::borrow(&prison_system.prison_accounts, prison_id);
+        let prison_wallet = borrow_global_mut<Wallet>(prison_wallet_address);
+        deposit(prison_wallet, transfer_coin, ctx);
 
         let fee_coin = withdraw(from, fee_amount, ctx);
         let fee_wallet = borrow_global_mut<Wallet>(fee_manager.fee_recipient);
         deposit(fee_wallet, fee_coin, ctx);
+
+        event::emit(TransferEvent {
+            from: from.owner,
+            to: prison_wallet_address,
+            amount: transfer_amount,
+            prison_id: option::some(prison_id),
+        });
     }
 
     public fun create_escrow(
@@ -140,23 +175,23 @@ module prison_transfer::money_transfer {
         deposit(to, coin, ctx);
     }
 
-    public fun integrate_with_prison_system(admin: address, ctx: &mut TxContext) {
+    public fun create_prison_financial_system(ctx: &mut TxContext) {
         let system = PrisonFinancialSystem {
             id: object::new(ctx),
-            admin,
+            admin: tx_context::sender(ctx),
+            prison_accounts: table::new(ctx),
         };
-        transfer::transfer(system, admin);
+        transfer::share_object(system);
     }
 
-    public fun update_inmate_balance(
-        system: &PrisonFinancialSystem,
-        inmate_wallet: &mut Wallet,
-        amount: u64,
+    public fun add_prison_account(
+        system: &mut PrisonFinancialSystem,
+        prison_id: u64,
+        prison_wallet: &Wallet,
         ctx: &mut TxContext
     ) {
         assert!(tx_context::sender(ctx) == system.admin, EUnauthorized);
-        let coin = coin::mint_for_testing(amount, ctx); // In production, you'd transfer from a system balance
-        deposit(inmate_wallet, coin, ctx);
+        table::add(&mut system.prison_accounts, prison_id, prison_wallet.owner);
     }
 
     public fun create_fee_manager(fee_percentage: u64, fee_recipient: address, ctx: &mut TxContext) {
@@ -177,7 +212,6 @@ module prison_transfer::money_transfer {
         balance::value(&wallet.balance)
     }
 }
-
 
 /*
 
