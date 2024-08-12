@@ -23,7 +23,7 @@ module EventList::EventList {
     }
 
     // Initialize the EventList resource in the contract owner's account
-    public fun initialize_event_list(account: &signer) {
+    public entry fun initialize_event_list(account: &signer) {
         let event_list = EventList {
             events: vector::empty<Event>(),
             event_handler: account::new_event_handle<EventTriggeredEvent>(account),
@@ -32,14 +32,14 @@ module EventList::EventList {
     }
 
     // Add an event to the EventList
-    public fun add_event(account: &signer, id: u64, description: vector<u8>) acquires EventList {
+    public entry fun add_event(account: &signer, id: u64, description: vector<u8>) acquires EventList {
         let event_list = borrow_global_mut<EventList>(signer::address_of(account));
         let new_event = Event { id, description };
         vector::push_back(&mut event_list.events, new_event);
     }
 
     // Trigger an event by its ID
-    public fun trigger_event(account: &signer, id: u64) acquires EventList {
+    public entry fun trigger_event(account: &signer, id: u64) acquires EventList {
         let event_list = borrow_global_mut<EventList>(signer::address_of(account));
         let event = vector::borrow(&event_list.events, id);
         let trigger_event = EventTriggeredEvent {
@@ -55,3 +55,4 @@ module EventList::EventList {
         *&event_list.events
     }
 }
+
