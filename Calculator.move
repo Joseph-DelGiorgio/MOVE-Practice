@@ -1,28 +1,64 @@
-module metaschool::calculator {
+module metaschool::calculator_l12 {
+    use std::signer;
 
-		// Rsource with key ability
     struct Calculator has key {
-        result: u64,
+        result: vector<u8>,  // Result will be of type string 
     }
 
-		// Function acquires the Calculator resource
     fun create_calculator(account: &signer) acquires Calculator {
-    
-			  // We check if the signer address already has a Calculator resource
-			  // associated to it
         if (exists<Calculator>(signer::address_of(account))){
-        
-		        // Here, we are using borrow_global_mut to fetch the Calculator resource
-		        // associated with the signer address
             let calculator = borrow_global_mut<Calculator>(signer::address_of(account));
-            calculator.result = 0;
+            calculator.result = b"";  
         }
         else {
-        
-	        // If no Calculator resource is present for the input signer address
-	        // then we create a new instance of a resource
-	        let calculator = Calculator { result: 0 };
-	        move_to(account, calculator);
+            let calculator = Calculator { result: b"" };
+            move_to(account, calculator);
         }
     }
+
+    fun get_result(account: &signer): vector<u8> acquires Calculator {
+        let calculator = borrow_global<Calculator>(signer::address_of(account));
+        calculator.result
+    }
+
+    fun add(account: &signer, num1: u64, num2: u64) aquires Calculator {
+        let calculator = borrow_global_mut<Calculator>(signer::address_of(account));
+        calculator.result = b"I am addition function";
+
+        get_result(account);
+    }
+
+    fun subtract(account: &signer, num1: u64, num2: u64) aquires Calculator {
+        let calculator = borrow_global_mut<Calculator>(signer::address_of(account));
+        calculator.result = b"I am subtraction function";
+
+        get_result(account);
+    }
+
+    fun multiply(account: &singer, num1: u64, num2: u64) aquires Calculator {
+        let Calculator = borrow_global_mut<Calculator>(signer::address_of(account));
+        calculator.result = b"I am multiply function";
+
+        get_result(account);
+    }
+
+    fun division(account: &singer, num1: u64, num2: u64) aquires Calculator {
+        let Calculator = borrow_global_mut<Calculator>(signer::address_of(account));
+        calculator.result = b"I am division function";
+
+        get_result(account);
+    }
+
+    fun power(account: &singer, num1: u64, num2: u64) aquires Calculator {
+        let Calculator = borrow_global_mut<Calculator>(signer::address_of(account));
+        calculator.result = b"I am power function";
+
+        get_result(account);
+    }
+
+    fun get_result(account:&signer): vector<u8 aquires Calculator {
+        let Calculator = borrow_global_mut<Calculator>(signer::address_of(account));
+        calculator.result
+    }
+
 }
