@@ -1,4 +1,6 @@
 module 0xcafe::spider_nest {
+     use aptos_framework::account;
+     use aptos_framework::event;
      use std::vector;
 
     struct SpiderDna has key {
@@ -10,29 +12,35 @@ module 0xcafe::spider_nest {
         dna: u64,
     }
 
+    #[event]
+    struct SpawnSpiderEvent has drop, store {
+        dna: u64,
+    }
     struct SpiderSwarm has key {
         spiders: vector<Spider>,
     }
 
     fun init_module(cafe_signer: &signer) {
-        let dna_digits = 10;
-        let dna_modulus = 10 ^ dna_digits;
+        let dna_modulus = 10 ^ 10;
         move_to(cafe_signer, SpiderDna {
-            dna_digits,
-            dna_modulus: (dna_modulus as u256),
+            dna_digits: 10,
+            dna_modulus,
         });
         move_to(cafe_signer, SpiderSwarm {
             spiders: vector[],
         });
     }
 
-    public fun spawn_spider(dna: u64) acquires SpiderSwarm {
+    fun spawn_spider(dna: u64) acquires SpiderSwarm {
         let spider = Spider {
             dna,
         };
-       // Start here. First get the SpiderSwarm resource and then push the new spider to the end.
         let spider_swarm = borrow_global_mut<SpiderSwarm>(@0xcafe);
         vector::push_back(&mut spider_swarm.spiders, spider);
+
+        event::emit(SpawnSpiderEvent {
+            dna,
+        });
     }
 
     public fun get_dna_digits(): u64 acquires SpiderDna {
@@ -50,4 +58,5 @@ module 0xcafe::spider_nest {
         first_spider.dna
     }
 }
+
 
