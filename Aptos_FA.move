@@ -124,3 +124,27 @@ module aptos_asset::fungible_asset{
 
 }
 
+
+//Move.toml
+
+[package]
+name = 'MyToken'
+version = '1.0.0'
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "testnet" }
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-stdlib", rev = "testnet" }
+AptosToken = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-token", rev = "testnet" }
+AptosTokenObjects = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-token-objects", rev = "testnet" }
+
+[addresses]
+aptos_asset = "0xb1f4afa3ba948a570499706b00124653cf54627fcdc421de1517d98f2eeb41f8"
+std = "0x1"
+aptos_std = "0x1"
+aptos_framework = "0x1"
+aptos_token = "0x3"
+aptos_token_objects = "0x4"
+
+
+
+
