@@ -1,204 +1,149 @@
-module music_royalties::distribution {
+module collab::music_platform {
     use sui::object::{Self, UID};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
+    use sui::balance::{Self, Balance};
+    use sui::sui::SUI;
+    use sui::coin::{Self, Coin};
     use sui::event;
     use sui::table::{Self, Table};
-    use sui::balance::{Self, Balance};
-    use sui::coin::{Self, Coin};
-    use sui::clock::{Self, Clock};
-    use sui::sui::SUI;
     use std::vector;
+    use std::string::{Self, String};
 
-    // Structs
-    struct Song has key, store {
-        id: UID,
-        title: vector<u8>,
-        artist: address,
-        collaborators: vector<address>,
-        royalty_splits: vector<u64>, // Percentages, should sum to 100
-        price: u64,
-        streams: u64
-    }
+    // Error codes
+    const EINVALID_CONTRIBUTION: u64 = 0;
+    const EUNAUTHORIZED: u64 = 1;
+    const ESONG_NOT_FINALIZED: u64 = 2;
 
     struct MusicPlatform has key {
         id: UID,
-        songs: Table<UID, Song>,
-        royalties: Table<address, Balance<SUI>>,
-        stream_price: u64
+        songs: Table<ID, Song>,
+        royalties: Balance<SUI>,
     }
 
-    struct SongToken has key, store {
+    struct Song has key, store {
         id: UID,
-        song_id: UID,
-        owner: address
+        title: String,
+        creator: address,
+        contributors: vector<address>,
+        tracks: vector<Track>,
+        finalized: bool,
     }
 
-    // Events
-    struct SongUploaded has copy, drop {
-        song_id: UID,
-        title: vector<u8>,
-        artist: address
+    struct Track has store {
+        contributor: address,
+        instrument: String,
+        ipfs_hash: String,
     }
 
-    struct SongPurchased has copy, drop {
-        song_id: UID,
-        buyer: address
+    struct Collaboration has copy, drop {
+        song_id: ID,
+        contributor: address,
+        instrument: String,
     }
 
-    struct SongStreamed has copy, drop {
-        song_id: UID,
-        listener: address
+    struct SongFinalized has copy, drop {
+        song_id: ID,
+        title: String,
+        contributors: vector<address>,
     }
 
-    // Error codes
-    const ERR_INVALID_ROYALTY_SPLIT: u64 = 1;
-    const ERR_INSUFFICIENT_PAYMENT: u64 = 2;
-
-    // Initialize the music platform
     fun init(ctx: &mut TxContext) {
         let platform = MusicPlatform {
             id: object::new(ctx),
             songs: table::new(ctx),
-            royalties: table::new(ctx),
-            stream_price: 1 // 1 SUI per stream, adjust as needed
+            royalties: balance::zero(),
         };
         transfer::share_object(platform);
     }
 
-    // Upload a new song
-    public fun upload_song(
+    public entry fun create_song(
         platform: &mut MusicPlatform,
         title: vector<u8>,
-        collaborators: vector<address>,
-        royalty_splits: vector<u64>,
-        price: u64,
         ctx: &mut TxContext
     ) {
-        // Ensure royalty splits sum to 100
-        let total_split = 0;
-        let i = 0;
-        while (i < vector::length(&royalty_splits)) {
-            total_split = total_split + *vector::borrow(&royalty_splits, i);
-            i = i + 1;
-        };
-        assert!(total_split == 100, ERR_INVALID_ROYALTY_SPLIT);
-
-        let song_id = object::new(ctx);
         let song = Song {
             id: object::new(ctx),
-            title,
-            artist: tx_context::sender(ctx),
-            collaborators,
-            royalty_splits,
-            price,
-            streams: 0
+            title: string::utf8(title),
+            creator: tx_context::sender(ctx),
+            contributors: vector::singleton(tx_context::sender(ctx)),
+            tracks: vector::empty(),
+            finalized: false,
         };
-
-        table::add(&mut platform.songs, object::uid_to_inner(&song.id), song);
-
-        event::emit(SongUploaded {
-            song_id: object::uid_to_inner(&song.id),
-            title,
-            artist: tx_context::sender(ctx)
-        });
+        let song_id = object::id(&song);
+        table::add(&mut platform.songs, song_id, song);
     }
 
-    // Purchase a song
-    public fun purchase_song(
+    public entry fun add_track(
         platform: &mut MusicPlatform,
-        song_id: UID,
-        payment: &mut Coin<SUI>,
+        song_id: ID,
+        instrument: vector<u8>,
+        ipfs_hash: vector<u8>,
         ctx: &mut TxContext
     ) {
-        let song = table::borrow(&platform.songs, object::uid_to_inner(&song_id));
-        assert!(coin::value(payment) >= song.price, ERR_INSUFFICIENT_PAYMENT);
+        let song = table::borrow_mut(&mut platform.songs, song_id);
+        assert!(!song.finalized, ESONG_NOT_FINALIZED);
 
-        // Transfer payment and create SongToken
-        let paid = coin::split(payment, song.price, ctx);
-        distribute_royalties(platform, &song, coin::into_balance(paid));
-
-        let song_token = SongToken {
-            id: object::new(ctx),
-            song_id: object::uid_to_inner(&song_id),
-            owner: tx_context::sender(ctx)
+        let track = Track {
+            contributor: tx_context::sender(ctx),
+            instrument: string::utf8(instrument),
+            ipfs_hash: string::utf8(ipfs_hash),
         };
-        transfer::transfer(song_token, tx_context::sender(ctx));
+        vector::push_back(&mut song.tracks, track);
+        if (!vector::contains(&song.contributors, &tx_context::sender(ctx))) {
+            vector::push_back(&mut song.contributors, tx_context::sender(ctx));
+        };
 
-        event::emit(SongPurchased {
-            song_id: object::uid_to_inner(&song_id),
-            buyer: tx_context::sender(ctx)
+        event::emit(Collaboration {
+            song_id,
+            contributor: tx_context::sender(ctx),
+            instrument: string::utf8(instrument),
         });
     }
 
-    // Stream a song
-    public fun stream_song(
+    public entry fun finalize_song(
         platform: &mut MusicPlatform,
-        song_id: UID,
-        payment: &mut Coin<SUI>,
+        song_id: ID,
         ctx: &mut TxContext
     ) {
-        assert!(coin::value(payment) >= platform.stream_price, ERR_INSUFFICIENT_PAYMENT);
+        let song = table::borrow_mut(&mut platform.songs, song_id);
+        assert!(song.creator == tx_context::sender(ctx), EUNAUTHORIZED);
+        assert!(!song.finalized, ESONG_NOT_FINALIZED);
 
-        let song = table::borrow_mut(&mut platform.songs, object::uid_to_inner(&song_id));
-        song.streams = song.streams + 1;
+        song.finalized = true;
 
-        let paid = coin::split(payment, platform.stream_price, ctx);
-        distribute_royalties(platform, song, coin::into_balance(paid));
-
-        event::emit(SongStreamed {
-            song_id: object::uid_to_inner(&song_id),
-            listener: tx_context::sender(ctx)
+        event::emit(SongFinalized {
+            song_id,
+            title: song.title,
+            contributors: song.contributors,
         });
     }
 
-    // Distribute royalties to collaborators
-    fun distribute_royalties(platform: &mut MusicPlatform, song: &Song, payment: Balance<SUI>) {
-        let total_amount = balance::value(&payment);
+    public entry fun distribute_royalties(
+        platform: &mut MusicPlatform,
+        song_id: ID,
+        amount: Coin<SUI>,
+        ctx: &mut TxContext
+    ) {
+        let song = table::borrow(&platform.songs, song_id);
+        assert!(song.finalized, ESONG_NOT_FINALIZED);
+
+        let total_contributors = vector::length(&song.contributors);
+        let share = coin::value(&amount) / total_contributors;
+
         let i = 0;
-        while (i < vector::length(&song.collaborators)) {
-            let collaborator = *vector::borrow(&song.collaborators, i);
-            let split = *vector::borrow(&song.royalty_splits, i);
-            let amount = (total_amount * split) / 100;
-
-            if (!table::contains(&platform.royalties, collaborator)) {
-                table::add(&mut platform.royalties, collaborator, balance::zero<SUI>());
-            };
-            let collab_balance = table::borrow_mut(&mut platform.royalties, collaborator);
-            balance::join(collab_balance, balance::split(&mut payment, amount));
-
+        while (i < total_contributors) {
+            let contributor = *vector::borrow(&song.contributors, i);
+            let payment = coin::split(&mut amount, share, ctx);
+            transfer::public_transfer(payment, contributor);
             i = i + 1;
         };
-        // Any remaining dust goes to the main artist
-        if (balance::value(&payment) > 0) {
-            let artist_balance = table::borrow_mut(&mut platform.royalties, song.artist);
-            balance::join(artist_balance, payment);
-        };
-    }
 
-    // Withdraw accumulated royalties
-    public fun withdraw_royalties(
-        platform: &mut MusicPlatform,
-        ctx: &mut TxContext
-    ): Coin<SUI> {
-        let sender = tx_context::sender(ctx);
-        assert!(table::contains(&platform.royalties, sender), 0);
-
-        let royalties = table::borrow_mut(&mut platform.royalties, sender);
-        let amount = balance::value(royalties);
-        coin::from_balance(balance::split(royalties, amount), ctx)
-    }
-
-    // Getters
-    public fun get_song_info(platform: &MusicPlatform, song_id: UID): &Song {
-        table::borrow(&platform.songs, object::uid_to_inner(&song_id))
-    }
-
-    public fun get_royalty_balance(platform: &MusicPlatform, address: address): u64 {
-        if (table::contains(&platform.royalties, address)) {
-            balance::value(table::borrow(&platform.royalties, address))
+        // Any remaining balance (due to rounding) goes to the platform
+        if (coin::value(&amount) > 0) {
+            balance::join(&mut platform.royalties, coin::into_balance(amount));
         } else {
-            0
-        }
+            coin::destroy_zero(amount);
+        };
     }
 }
