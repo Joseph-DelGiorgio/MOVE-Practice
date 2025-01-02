@@ -7,29 +7,28 @@ module bar::alcoholic_bar {
     use sui::clock::{Self, Clock};
     use sui::event;
     use sui::table::{Self, Table};
-    use sui::vec_map::{Self, VecMap};
     use std::string::{Self, String};
-    use std::vector;
+    use std::option::{Self, Option};
 
-    // Structs
+    /// Structs
     struct Bar has key {
         id: UID,
         owner: address,
         inventory: Table<ID, Beverage>,
         license: LiquorLicense,
-        sales: u64,
+        total_sales: u64,
         loyalty_program: Table<address, LoyaltyPoints>,
     }
 
     struct Beverage has key, store {
         id: UID,
         name: String,
-        beverage_type: u8, // 0: Beer, 1: Wine, 2: Spirit
+        beverage_type: u8, // 0 = Beer, 1 = Wine, 2 = Spirits
         brand: String,
-        abv: u64, // Alcohol by volume, stored as percentage * 100
+        abv: u64, // Alcohol by volume (percentage * 100)
         price: u64,
         stock: u64,
-        expiration: u64,
+        expiration_date: u64,
     }
 
     struct LiquorLicense has store {
@@ -48,7 +47,7 @@ module bar::alcoholic_bar {
         verification_time: u64,
     }
 
-    // Events
+    /// Events
     struct DrinkServed has copy, drop {
         beverage_id: ID,
         customer: address,
@@ -56,27 +55,32 @@ module bar::alcoholic_bar {
         timestamp: u64,
     }
 
-    // Constants
+    /// Constants
     const BEER: u8 = 0;
     const WINE: u8 = 1;
-    const SPIRIT: u8 = 2;
+    const SPIRITS: u8 = 2;
 
-    // Error codes
+    /// Error Codes
     const EInsufficientStock: u64 = 0;
     const EInvalidAge: u64 = 1;
-    const EInsufficientPayment: u64 = 2;
-    const EUnauthorized: u64 = 3;
-    const EExpiredLicense: u64 = 4;
-    const EExpiredBeverage: u64 = 5;
+    const EExpiredLicense: u64 = 2;
+    const EExpiredBeverage: u64 = 3;
+    const EInsufficientPayment: u64 = 4;
+    const EUnauthorizedAccess: u64 = 5;
 
-    // Functions
-    public fun create_bar(license_number: String, license_expiration: u64, ctx: &mut TxContext) {
+    /// Functions
+
+    public fun create_bar(
+        license_number: String,
+        license_expiration_date: u64,
+        ctx: &mut TxContext
+    ) {
         let bar = Bar {
             id: object::new(ctx),
             owner: tx_context::sender(ctx),
             inventory: table::new(ctx),
-            license: LiquorLicense { license_number, expiration_date: license_expiration },
-            sales: 0,
+            license: LiquorLicense { license_number, expiration_date: license_expiration_date },
+            total_sales: 0,
             loyalty_program: table::new(ctx),
         };
         transfer::share_object(bar);
@@ -90,10 +94,10 @@ module bar::alcoholic_bar {
         abv: u64,
         price: u64,
         stock: u64,
-        expiration: u64,
+        expiration_date: u64,
         ctx: &mut TxContext
     ) {
-        assert!(tx_context::sender(ctx) == bar.owner, EUnauthorized);
+        assert!(tx_context::sender(ctx) == bar.owner, EUnauthorizedAccess);
         let beverage = Beverage {
             id: object::new(ctx),
             name,
@@ -102,7 +106,7 @@ module bar::alcoholic_bar {
             abv,
             price,
             stock,
-            expiration,
+            expiration_date,
         };
         let beverage_id = object::id(&beverage);
         table::add(&mut bar.inventory, beverage_id, beverage);
@@ -117,7 +121,7 @@ module bar::alcoholic_bar {
             verified: age >= 21,
             verification_time: current_time,
         };
-        transfer::public_transfer(verification, customer);
+        transfer::transfer(verification, customer);
     }
 
     public fun serve_drink(
@@ -133,7 +137,7 @@ module bar::alcoholic_bar {
 
         let beverage = table::borrow_mut(&mut bar.inventory, beverage_id);
         assert!(beverage.stock > 0, EInsufficientStock);
-        assert!(clock::timestamp_ms(clock) < beverage.expiration, EExpiredBeverage);
+        assert!(clock::timestamp_ms(clock) < beverage.expiration_date, EExpiredBeverage);
         assert!(coin::value(payment) >= beverage.price, EInsufficientPayment);
 
         let price = beverage.price;
@@ -141,7 +145,7 @@ module bar::alcoholic_bar {
         transfer::public_transfer(paid, bar.owner);
 
         beverage.stock = beverage.stock - 1;
-        bar.sales = bar.sales + price;
+        bar.total_sales = bar.total_sales + price;
 
         // Update loyalty points
         let customer = tx_context::sender(ctx);
@@ -174,11 +178,41 @@ module bar::alcoholic_bar {
     }
 
     public fun update_license(bar: &mut Bar, new_expiration: u64, ctx: &mut TxContext) {
-        assert!(tx_context::sender(ctx) == bar.owner, EUnauthorized);
+        assert!(tx_context::sender(ctx) == bar.owner, EUnauthorizedAccess);
         bar.license.expiration_date = new_expiration;
     }
 
     public fun get_bar_stats(bar: &Bar): (u64, u64) {
-        (bar.sales, table::length(&bar.inventory))
+        (bar.total_sales, table::length(&bar.inventory))
+    }
+
+    public fun restock_beverage(bar: &mut Bar, beverage_id: ID, additional_stock: u64, ctx: &mut TxContext) {
+        assert!(tx_context::sender(ctx) == bar.owner, EUnauthorizedAccess);
+        let beverage = table::borrow_mut(&mut bar.inventory, beverage_id);
+        beverage.stock = beverage.stock + additional_stock;
+    }
+
+    public fun update_beverage_price(bar: &mut Bar, beverage_id: ID, new_price: u64, ctx: &mut TxContext) {
+        assert!(tx_context::sender(ctx) == bar.owner, EUnauthorizedAccess);
+        let beverage = table::borrow_mut(&mut bar.inventory, beverage_id);
+        beverage.price = new_price;
+    }
+
+    public fun remove_expired_beverages(bar: &mut Bar, clock: &Clock, ctx: &mut TxContext) {
+        assert!(tx_context::sender(ctx) == bar.owner, EUnauthorizedAccess);
+        let current_time = clock::timestamp_ms(clock);
+        let expired_beverages = vector::empty();
+
+        let inventory = &mut bar.inventory;
+        table::iter(inventory, |id, beverage| {
+            if (beverage.expiration_date <= current_time) {
+                vector::push_back(&mut expired_beverages, *id);
+            }
+        });
+
+        while (!vector::is_empty(&expired_beverages)) {
+            let id = vector::pop_back(&mut expired_beverages);
+            table::remove(inventory, id);
+        }
     }
 }
