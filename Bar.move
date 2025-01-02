@@ -1,3 +1,18 @@
+/*
+This improved version of the smart contract includes all the core functionalities of the alcoholic bar management system, with additional features and improvements:
+Bar creation and management
+Beverage inventory management
+Age verification
+Drink serving process with payment handling
+Loyalty program
+License management
+Restocking functionality
+Price update capability
+Expired beverage removal
+Various getter functions for retrieving information
+*/
+
+
 module bar::alcoholic_bar {
     use sui::object::{Self, UID};
     use sui::transfer;
