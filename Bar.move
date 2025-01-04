@@ -1,15 +1,14 @@
 /*
-This improved version of the smart contract includes all the core functionalities of the alcoholic bar management system, with additional features and improvements:
-Bar creation and management
-Beverage inventory management
-Age verification
-Drink serving process with payment handling
-Loyalty program
-License management
-Restocking functionality
-Price update capability
-Expired beverage removal
-Various getter functions for retrieving information
+Key improvements in this version:
+Added a staff management system with add_staff and remove_staff functions.
+Implemented a Happy Hour feature with dynamic pricing.
+Enhanced the loyalty program to track last visit time.
+Added more detailed events for better off-chain tracking.
+Improved access control using a staff list stored in a VecSet.
+Added constants for maximum ABV and discount percentages.
+Implemented additional checks for input validation.
+Modularized the price calculation and loyalty point update logic.
+Added more comprehensive error codes.
 */
 
 module bar::alcoholic_bar {
