@@ -1,3 +1,39 @@
+/*
+Diet_Resume.move is designed to manage customer profiles and restaurant interactions in a decentralized restaurant management system. 
+
+Here's a breakdown of its components:
+
+Imports: The contract uses various Sui and standard libraries for object management,
+transfers, context handling, data structures, and coin operations.
+
+
+Structs:
+CustomerProfile: Represents a customer's profile with personal info, dietary restrictions, favorite orders, and loyalty points.
+Order: Represents a specific order with item name, customizations, and price.
+Restaurant: Represents a restaurant with a name and menu (items and prices).
+
+
+Events:
+ProfileCreated: Emitted when a new customer profile is created.
+OrderPlaced: Emitted when an order is placed, containing order details.
+Error codes: Define specific error scenarios like insufficient payment or item not found.
+
+
+Functions:
+create_profile: Creates a new customer profile and transfers it to the sender.
+add_dietary_restriction: Adds a dietary restriction to a customer's profile.
+add_favorite_order: Adds a favorite order to a customer's profile for a specific restaurant.
+place_order: Processes an order, handles payment, updates loyalty points, and emits an event.
+get_profile_info: Retrieves basic information from a customer's profile.
+get_favorite_order: Retrieves a customer's favorite order for a specific restaurant.
+create_restaurant: Creates a new restaurant object.
+add_menu_item: Adds a new item to a restaurant's menu.
+This contract provides a foundation for managing customer profiles, favorite orders, 
+and restaurant menus in a decentralized manner, utilizing Sui's object-centric model and Move's safety features.
+*/
+
+
+
 module restaurant_profile::customer_profile {
     use sui::object::{Self, UID};
     use sui::transfer;
