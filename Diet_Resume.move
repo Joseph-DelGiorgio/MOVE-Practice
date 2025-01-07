@@ -33,7 +33,6 @@ and restaurant menus in a decentralized manner, utilizing Sui's object-centric m
 */
 
 
-
 module restaurant_profile::customer_profile {
     use sui::object::{Self, UID};
     use sui::transfer;
@@ -42,8 +41,11 @@ module restaurant_profile::customer_profile {
     use sui::vec_map::{Self, VecMap};
     use sui::coin::{Self, Coin};
     use sui::sui::SUI;
+    use sui::event;
+    use sui::clock::{Self, Clock};
     use std::string::{Self, String};
     use std::vector;
+    use std::option::{Self, Option};
 
     // Structs
     struct CustomerProfile has key {
@@ -53,23 +55,39 @@ module restaurant_profile::customer_profile {
         dietary_restrictions: vector<String>,
         favorite_orders: Table<String, Order>,
         loyalty_points: u64,
+        last_order_timestamp: u64,
     }
 
     struct Order has store {
         item_name: String,
         customizations: VecMap<String, String>,
         price: u64,
+        timestamp: u64,
     }
 
     struct Restaurant has key {
         id: UID,
         name: String,
-        menu: Table<String, u64>, // item name to price
+        menu: Table<String, MenuItem>,
+        owner: address,
+    }
+
+    struct MenuItem has store {
+        price: u64,
+        description: String,
+        available: bool,
+    }
+
+    struct LoyaltyProgram has key {
+        id: UID,
+        points_per_dollar: u64,
+        redemption_rate: u64, // How many points for $1 off
     }
 
     // Events
     struct ProfileCreated has copy, drop {
         customer_email: String,
+        timestamp: u64,
     }
 
     struct OrderPlaced has copy, drop {
@@ -77,15 +95,26 @@ module restaurant_profile::customer_profile {
         restaurant_name: String,
         item_name: String,
         price: u64,
+        timestamp: u64,
+    }
+
+    struct LoyaltyPointsRedeemed has copy, drop {
+        customer_email: String,
+        points_redeemed: u64,
+        discount_amount: u64,
+        timestamp: u64,
     }
 
     // Error codes
     const EProfileAlreadyExists: u64 = 0;
     const EInsufficientPayment: u64 = 1;
     const EItemNotFound: u64 = 2;
+    const EItemNotAvailable: u64 = 3;
+    const EInsufficientLoyaltyPoints: u64 = 4;
+    const EUnauthorized: u64 = 5;
 
     // Functions
-    public fun create_profile(email: String, name: String, ctx: &mut TxContext) {
+    public fun create_profile(email: String, name: String, clock: &Clock, ctx: &mut TxContext) {
         let profile = CustomerProfile {
             id: object::new(ctx),
             email,
@@ -93,13 +122,19 @@ module restaurant_profile::customer_profile {
             dietary_restrictions: vector::empty(),
             favorite_orders: table::new(ctx),
             loyalty_points: 0,
+            last_order_timestamp: 0,
         };
         transfer::transfer(profile, tx_context::sender(ctx));
-        event::emit(ProfileCreated { customer_email: email });
+        event::emit(ProfileCreated { 
+            customer_email: email,
+            timestamp: clock::timestamp_ms(clock),
+        });
     }
 
     public fun add_dietary_restriction(profile: &mut CustomerProfile, restriction: String) {
-        vector::push_back(&mut profile.dietary_restrictions, restriction);
+        if (!vector::contains(&profile.dietary_restrictions, &restriction)) {
+            vector::push_back(&mut profile.dietary_restrictions, restriction);
+        }
     }
 
     public fun add_favorite_order(
@@ -107,10 +142,20 @@ module restaurant_profile::customer_profile {
         restaurant_name: String, 
         item_name: String, 
         customizations: VecMap<String, String>,
-        price: u64
+        price: u64,
+        clock: &Clock,
     ) {
-        let order = Order { item_name, customizations, price };
-        table::add(&mut profile.favorite_orders, restaurant_name, order);
+        let order = Order { 
+            item_name, 
+            customizations, 
+            price,
+            timestamp: clock::timestamp_ms(clock),
+        };
+        if (table::contains(&profile.favorite_orders, restaurant_name)) {
+            *table::borrow_mut(&mut profile.favorite_orders, restaurant_name) = order;
+        } else {
+            table::add(&mut profile.favorite_orders, restaurant_name, order);
+        }
     }
 
     public fun place_order(
@@ -118,45 +163,98 @@ module restaurant_profile::customer_profile {
         restaurant: &Restaurant,
         item_name: String,
         payment: &mut Coin<SUI>,
+        loyalty_program: &LoyaltyProgram,
+        clock: &Clock,
         ctx: &mut TxContext
     ) {
         assert!(table::contains(&restaurant.menu, &item_name), EItemNotFound);
-        let price = *table::borrow(&restaurant.menu, &item_name);
-        assert!(coin::value(payment) >= price, EInsufficientPayment);
+        let menu_item = table::borrow(&restaurant.menu, &item_name);
+        assert!(menu_item.available, EItemNotAvailable);
+        assert!(coin::value(payment) >= menu_item.price, EInsufficientPayment);
 
-        let paid = coin::split(payment, price, ctx);
-        transfer::public_transfer(paid, tx_context::sender(ctx)); // Transfer to restaurant owner
+        let paid = coin::split(payment, menu_item.price, ctx);
+        transfer::public_transfer(paid, restaurant.owner);
 
-        profile.loyalty_points = profile.loyalty_points + (price / 100); // 1 point per $1 spent
+        let points_earned = (menu_item.price / 100) * loyalty_program.points_per_dollar;
+        profile.loyalty_points = profile.loyalty_points + points_earned;
+        profile.last_order_timestamp = clock::timestamp_ms(clock);
 
         event::emit(OrderPlaced {
             customer_email: profile.email,
             restaurant_name: restaurant.name,
             item_name,
-            price,
+            price: menu_item.price,
+            timestamp: clock::timestamp_ms(clock),
         });
     }
 
-    public fun get_profile_info(profile: &CustomerProfile): (String, String, vector<String>, u64) {
-        (profile.email, profile.name, profile.dietary_restrictions, profile.loyalty_points)
+    public fun redeem_loyalty_points(
+        profile: &mut CustomerProfile,
+        points_to_redeem: u64,
+        loyalty_program: &LoyaltyProgram,
+        clock: &Clock,
+    ): u64 {
+        assert!(profile.loyalty_points >= points_to_redeem, EInsufficientLoyaltyPoints);
+        let discount = (points_to_redeem / loyalty_program.redemption_rate) * 100; // Convert to cents
+        profile.loyalty_points = profile.loyalty_points - points_to_redeem;
+
+        event::emit(LoyaltyPointsRedeemed {
+            customer_email: profile.email,
+            points_redeemed: points_to_redeem,
+            discount_amount: discount,
+            timestamp: clock::timestamp_ms(clock),
+        });
+
+        discount
     }
 
-    public fun get_favorite_order(profile: &CustomerProfile, restaurant_name: &String): (String, VecMap<String, String>, u64) {
-        let order = table::borrow(&profile.favorite_orders, restaurant_name);
-        (order.item_name, order.customizations, order.price)
+    public fun get_profile_info(profile: &CustomerProfile): (String, String, vector<String>, u64, u64) {
+        (profile.email, profile.name, profile.dietary_restrictions, profile.loyalty_points, profile.last_order_timestamp)
     }
 
-    // Restaurant functions
+    public fun get_favorite_order(profile: &CustomerProfile, restaurant_name: &String): Option<(String, VecMap<String, String>, u64)> {
+        if (table::contains(&profile.favorite_orders, restaurant_name)) {
+            let order = table::borrow(&profile.favorite_orders, restaurant_name);
+            option::some((order.item_name, order.customizations, order.price))
+        } else {
+            option::none()
+        }
+    }
+
     public fun create_restaurant(name: String, ctx: &mut TxContext) {
         let restaurant = Restaurant {
             id: object::new(ctx),
             name,
             menu: table::new(ctx),
+            owner: tx_context::sender(ctx),
         };
         transfer::share_object(restaurant);
     }
 
-    public fun add_menu_item(restaurant: &mut Restaurant, item_name: String, price: u64) {
-        table::add(&mut restaurant.menu, item_name, price);
+    public fun add_menu_item(restaurant: &mut Restaurant, item_name: String, price: u64, description: String, ctx: &mut TxContext) {
+        assert!(tx_context::sender(ctx) == restaurant.owner, EUnauthorized);
+        let menu_item = MenuItem {
+            price,
+            description,
+            available: true,
+        };
+        table::add(&mut restaurant.menu, item_name, menu_item);
+    }
+
+    public fun update_menu_item_availability(restaurant: &mut Restaurant, item_name: String, available: bool, ctx: &mut TxContext) {
+        assert!(tx_context::sender(ctx) == restaurant.owner, EUnauthorized);
+        assert!(table::contains(&restaurant.menu, &item_name), EItemNotFound);
+        let menu_item = table::borrow_mut(&mut restaurant.menu, &item_name);
+        menu_item.available = available;
+    }
+
+    public fun create_loyalty_program(points_per_dollar: u64, redemption_rate: u64, ctx: &mut TxContext) {
+        let loyalty_program = LoyaltyProgram {
+            id: object::new(ctx),
+            points_per_dollar,
+            redemption_rate,
+        };
+        transfer::share_object(loyalty_program);
     }
 }
+
