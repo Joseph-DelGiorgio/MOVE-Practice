@@ -1,3 +1,18 @@
+?*
+Inventory Management: Items are stored in a Table, allowing for efficient lookup and management.
+Customer Accounts: Customers can create accounts to track loyalty points.
+Loyalty Program: Customers earn points based on their purchases.
+Discounts: The store owner can set a store-wide discount rate.
+Categories: Items now have categories for better organization.
+Events: The contract emits events for item additions and purchases, enabling off-chain tracking.
+More Detailed Item Structure: Items now include quantity and category.
+Store Statistics: The contract tracks total sales and current discount rate.
+Error Handling: Specific error codes for different scenarios.
+Getter Functions: Allow querying of item details and store statistics.
+Time-based Operations: Included a Clock parameter for potential time-based features (not fully implemented in this example).
+*/
+
+
 module retailer::advanced_store {
     use sui::object::{Self, UID};
     use sui::transfer;
