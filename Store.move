@@ -1,4 +1,4 @@
-?*
+/*
 Inventory Management: Items are stored in a Table, allowing for efficient lookup and management.
 Customer Accounts: Customers can create accounts to track loyalty points.
 Loyalty Program: Customers earn points based on their purchases.
