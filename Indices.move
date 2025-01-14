@@ -109,3 +109,94 @@ module CryptoIndex {
     }
 }
 
+# On-Chain Crypto Index Builder on Sui
+
+This repository contains a **Sui Move smart contract** that enables the creation and management of **on-chain crypto indices**. By leveraging **DeepBook's liquidity layer**, the contract provides real-time price and market depth data to ensure accurate index valuations and dynamic rebalancing. It is designed for developers building decentralized finance (DeFi) applications or users seeking to create diversified crypto portfolios directly on the Sui blockchain.
+
+---
+
+## Features
+
+### 1. **Index Creation**
+   - Create custom crypto indices by specifying a list of assets and their corresponding weights.
+   - Automatically calculates the initial value of the index using DeepBook’s liquidity data.
+
+### 2. **Real-Time Liquidity Integration**
+   - Fetches live price and liquidity data for each asset in the index using DeepBook APIs.
+   - Ensures that indices are built on reliable, up-to-date market data.
+
+### 3. **Dynamic Rebalancing**
+   - Automatically rebalance portfolios based on updated liquidity and price data.
+   - Keeps indices aligned with market conditions to maintain their intended structure.
+
+### 4. **Asset Management**
+   - Add or remove assets from an existing index dynamically.
+   - Adjust weights as needed to reflect portfolio changes.
+
+### 5. **Index Value Calculation**
+   - Calculates the total value of the portfolio in a base currency (e.g., USD).
+   - Uses real-time asset prices fetched from DeepBook.
+
+### 6. **Event Emission for Transparency**
+   - Emits events for key actions such as:
+     - `IndexCreated`: Triggered when a new index is created.
+     - `IndexRebalanced`: Triggered when an index is rebalanced.
+   - Enables easy tracking of changes and actions on-chain.
+
+---
+
+## How It Works
+
+1. **Create an Index**:
+   - Specify a name, a list of assets, and their weights.
+   - The contract fetches liquidity data from DeepBook to calculate the initial value.
+
+2. **Fetch Liquidity Data**:
+   - Use DeepBook’s API to retrieve real-time price and market depth for any asset in the index.
+
+3. **Rebalance Portfolios**:
+   - Dynamically adjust asset allocations based on updated market conditions.
+   - Emit events to notify users when rebalancing occurs.
+
+4. **Add or Remove Assets**:
+   - Modify an existing index by adding new assets or removing old ones while maintaining proper weight distribution.
+
+5. **Track Portfolio Value**:
+   - Continuously calculate the total value of the portfolio in a base currency (e.g., USD).
+
+---
+
+## Use Cases
+
+- **Portfolio Management**: Build diversified crypto portfolios with automated rebalancing.
+- **DeFi Applications**: Use this contract as a foundation for yield farming, derivatives trading, or other DeFi tools.
+- **Transparency & Automation**: Ensure transparency through event emission and automate portfolio adjustments with real-time market data.
+
+---
+
+## Example Workflow
+
+1. Deploy the smart contract on Sui.
+2. Create an index with your desired assets and weights.
+3. Fetch live liquidity data from DeepBook for accurate valuations.
+4. Rebalance your portfolio periodically based on updated market conditions.
+5. Add or remove assets as needed to adjust your portfolio structure.
+
+---
+
+## Why Use This Contract?
+
+This contract combines transparency, automation, and real-time market insights into a single tool that simplifies on-chain portfolio management. Whether you're a developer building DeFi applications or an individual looking to create custom crypto indices, this solution offers flexibility, accuracy, and ease of use.
+
+---
+
+## Future Enhancements
+
+- Support for more advanced rebalancing strategies (e.g., volatility-based adjustments).
+- Integration with other DeFi protocols for yield optimization.
+- Enhanced analytics features for tracking historical performance of indices.
+
+---
+
+Feel free to contribute or open issues if you have suggestions for improvements!
+
