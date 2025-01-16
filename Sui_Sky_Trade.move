@@ -73,6 +73,14 @@ module sky_trade::air_rights {
     use sui::sui::SUI;
     use sui::table::{Self, Table};
 
+    const ERR_INVALID_CUBIC_FEET: u64 = 2;
+    const ERR_INVALID_PRICE: u64 = 3;
+    const ERR_NOT_LISTED: u64 = 5;
+    const ERR_UNAUTHORIZED: u64 = 6;
+    const ERR_PRICE_ZERO: u64 = 7;
+    const ERR_ALREADY_DELISTED: u64 = 9;
+    const ERR_INVALID_PAYMENT: u64 = 11;
+
     // Structs
     struct AirRightsParcel has key, store {
         id: UID,
@@ -86,6 +94,7 @@ module sky_trade::air_rights {
         id: UID,
         parcels: Table<u64, AirRightsParcel>,
         next_id: u64,
+        admin: address,
     }
 
     // Events
@@ -100,6 +109,7 @@ module sky_trade::air_rights {
         from: address,
         to: address,
         parcel_id: u64,
+        total_price: u64,
     }
 
     struct AirRightsListedEvent has copy, drop {
@@ -114,13 +124,18 @@ module sky_trade::air_rights {
     }
 
     // Functions
-    fun init(ctx: &mut TxContext) {
+    public entry fun init(ctx: &mut TxContext) {
         let registry = AirRightsRegistry {
             id: object::new(ctx),
             parcels: table::new(ctx),
             next_id: 0,
+            admin: tx_context::sender(ctx),
         };
         transfer::share_object(registry);
+    }
+
+    fun is_admin(registry: &AirRightsRegistry, ctx: &TxContext) {
+        assert!(tx_context::sender(ctx) == registry.admin, ERR_UNAUTHORIZED);
     }
 
     public entry fun create_air_rights(
@@ -129,8 +144,8 @@ module sky_trade::air_rights {
         price_per_cubic_foot: u64,
         ctx: &mut TxContext
     ) {
-        assert!(cubic_feet > 0, 2);
-        assert!(price_per_cubic_foot > 0, 3);
+        assert!(cubic_feet > 0, ERR_INVALID_CUBIC_FEET);
+        assert!(price_per_cubic_foot > 0, ERR_INVALID_PRICE);
 
         let parcel_id = registry.next_id;
         registry.next_id = parcel_id + 1;
@@ -160,13 +175,18 @@ module sky_trade::air_rights {
         ctx: &mut TxContext
     ) {
         let parcel = table::borrow_mut(&mut registry.parcels, parcel_id);
-        assert!(parcel.is_listed, 5);
+        assert!(parcel.is_listed, ERR_NOT_LISTED);
 
         let expected_price = parcel.cubic_feet * parcel.price_per_cubic_foot;
-        assert!(coin::value(payment) == expected_price, 11);
+        assert!(coin::value(payment) >= expected_price, ERR_INVALID_PAYMENT);
 
         let seller = parcel.owner;
         let buyer = tx_context::sender(ctx);
+
+        let refund = coin::value(payment) - expected_price;
+        if (refund > 0) {
+            coin::split(payment, refund);
+        }
 
         coin::transfer(payment, seller);
 
@@ -177,6 +197,7 @@ module sky_trade::air_rights {
             from: seller,
             to: buyer,
             parcel_id,
+            total_price: expected_price,
         });
     }
 
@@ -187,8 +208,8 @@ module sky_trade::air_rights {
         ctx: &mut TxContext
     ) {
         let parcel = table::borrow_mut(&mut registry.parcels, parcel_id);
-        assert!(parcel.owner == tx_context::sender(ctx), 6);
-        assert!(price_per_cubic_foot > 0, 7);
+        assert!(parcel.owner == tx_context::sender(ctx), ERR_UNAUTHORIZED);
+        assert!(price_per_cubic_foot > 0, ERR_PRICE_ZERO);
 
         parcel.is_listed = true;
         parcel.price_per_cubic_foot = price_per_cubic_foot;
@@ -206,8 +227,8 @@ module sky_trade::air_rights {
         ctx: &mut TxContext
     ) {
         let parcel = table::borrow_mut(&mut registry.parcels, parcel_id);
-        assert!(parcel.owner == tx_context::sender(ctx), 8);
-        assert!(parcel.is_listed, 9);
+        assert!(parcel.owner == tx_context::sender(ctx), ERR_UNAUTHORIZED);
+        assert!(parcel.is_listed, ERR_ALREADY_DELISTED);
 
         parcel.is_listed = false;
 
@@ -217,5 +238,12 @@ module sky_trade::air_rights {
         });
     }
 
-    // Tests would need to be adjusted for Sui's testing framework
+    public entry fun update_admin(
+        registry: &mut AirRightsRegistry,
+        new_admin: address,
+        ctx: &mut TxContext
+    ) {
+        is_admin(registry, ctx);
+        registry.admin = new_admin;
+    }
 }
