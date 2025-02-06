@@ -146,3 +146,28 @@ module equity_tokenization::equity {
         coin::from_balance(withdrawn, ctx)
     }
 }
+
+/*
+Here are the new features and improvements:
+Added an AdminCap struct and init function to create an admin capability for privileged operations.
+Enhanced the Equity struct with:
+owner field to track the equity issuer
+dividend_pool to hold dividends for distribution
+last_dividend_timestamp to record the last dividend distribution
+shareholders table to keep track of all shareholders and their holdings
+Updated purchase_shares and transfer_shares to maintain the shareholders table.
+Added a distribute_dividends function to allow the equity owner to distribute dividends to shareholders.
+Added a claim_dividends function for shareholders to claim their dividends.
+Added update_share_price and delist_equity functions for administrative control.
+Added getter functions:
+get_share_price
+get_available_shares
+get_total_shares
+get_shareholders
+Improved error handling with more specific error codes.
+Added a DividendsDistributed event to track dividend distributions.
+Used the Clock object for timestamp recording in dividend distribution.
+These additions provide a more comprehensive equity tokenization system with dividend distribution capabilities, improved administrative controls,
+and better tracking of shareholders. The contract now offers more functionality while maintaining security and adhering to Sui Move best practices.
+*/
+
